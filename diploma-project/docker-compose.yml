@@ -1,0 +1,2 @@
+# Docker Compose configuration will be added during application skeleton initialization.
+services: {}
