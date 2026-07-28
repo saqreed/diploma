@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "diploma-auth-backend"
+version = "0.1.0"
+description = "Backend package for the three-factor authentication platform."
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "fastapi>=0.140.7,<0.141.0",
+    "uvicorn[standard]>=0.51.0,<0.52.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
