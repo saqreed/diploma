@@ -11,6 +11,7 @@ coverage/
 # Python cache
 __pycache__/
 *.py[cod]
+*.egg-info/
 
 # Environment files
 .env
