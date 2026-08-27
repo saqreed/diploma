@@ -11,6 +11,11 @@ SETTINGS_ENVIRONMENT_VARIABLES = (
     "DIPLOMA_APP_VERSION",
     "DIPLOMA_ENVIRONMENT",
     "DIPLOMA_DEBUG",
+    "DIPLOMA_DATABASE_URL",
+    "DIPLOMA_DATABASE_POOL_SIZE",
+    "DIPLOMA_DATABASE_MAX_OVERFLOW",
+    "DIPLOMA_DATABASE_POOL_TIMEOUT_SECONDS",
+    "DIPLOMA_DATABASE_POOL_RECYCLE_SECONDS",
 )
 
 
@@ -29,6 +34,12 @@ def test_settings_use_safe_defaults() -> None:
     assert settings.app_version == "0.1.0"
     assert settings.environment is Environment.DEVELOPMENT
     assert settings.debug is False
+    assert settings.database_url.hosts()[0]["host"] == "localhost"
+    assert settings.database_url.path == "/diploma"
+    assert settings.database_pool_size == 5
+    assert settings.database_max_overflow == 5
+    assert settings.database_pool_timeout_seconds == 30.0
+    assert settings.database_pool_recycle_seconds == 1800
 
 
 def test_settings_load_prefixed_environment_variables(
@@ -46,6 +57,29 @@ def test_settings_load_prefixed_environment_variables(
     assert settings.app_version == "1.2.3"
     assert settings.environment is Environment.TESTING
     assert settings.debug is True
+
+
+def test_settings_load_database_pool_environment_variables(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Database connection limits are configurable within validated bounds."""
+    monkeypatch.setenv(
+        "DIPLOMA_DATABASE_URL",
+        "postgresql+asyncpg://service:secret@database:5432/platform",
+    )
+    monkeypatch.setenv("DIPLOMA_DATABASE_POOL_SIZE", "8")
+    monkeypatch.setenv("DIPLOMA_DATABASE_MAX_OVERFLOW", "4")
+    monkeypatch.setenv("DIPLOMA_DATABASE_POOL_TIMEOUT_SECONDS", "15")
+    monkeypatch.setenv("DIPLOMA_DATABASE_POOL_RECYCLE_SECONDS", "900")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.database_url.hosts()[0]["host"] == "database"
+    assert settings.database_url.path == "/platform"
+    assert settings.database_pool_size == 8
+    assert settings.database_max_overflow == 4
+    assert settings.database_pool_timeout_seconds == 15.0
+    assert settings.database_pool_recycle_seconds == 900
 
 
 def test_settings_reject_unknown_environment(
