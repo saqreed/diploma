@@ -2,6 +2,7 @@ import { createBrowserRouter } from 'react-router'
 
 import { App } from '../App'
 import { LoginPage } from '../pages/LoginPage'
+import { TotpPage } from '../pages/TotpPage'
 
 export const applicationRouter = createBrowserRouter([
   {
@@ -11,6 +12,10 @@ export const applicationRouter = createBrowserRouter([
       {
         path: 'login',
         element: <LoginPage />,
+      },
+      {
+        path: 'totp',
+        element: <TotpPage />,
       },
     ],
   },
