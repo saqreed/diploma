@@ -1,6 +1,7 @@
 import { createBrowserRouter } from 'react-router'
 
 import { App } from '../App'
+import { AdminDashboardPage } from '../pages/AdminDashboardPage'
 import { DemoAppPage } from '../pages/DemoAppPage'
 import { EnrollmentPage } from '../pages/EnrollmentPage'
 import { LoginPage } from '../pages/LoginPage'
@@ -26,6 +27,10 @@ export const applicationRouter = createBrowserRouter([
       {
         path: 'demo',
         element: <DemoAppPage />,
+      },
+      {
+        path: 'admin',
+        element: <AdminDashboardPage />,
       },
     ],
   },
