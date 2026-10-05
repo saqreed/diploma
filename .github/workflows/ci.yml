@@ -1,0 +1,157 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend lint and build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.19.0'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+          package-manager-cache: false
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Check lint, TypeScript and production build
+        run: npm run check
+
+  backend:
+    name: Backend tests and dependencies
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12.14'
+          cache: pip
+          cache-dependency-path: |
+            backend/pyproject.toml
+            backend/constraints-linux.txt
+      - name: Install constrained dependencies
+        run: python -m pip install --constraint constraints-linux.txt --editable '.[test]' 'pytest==9.1.1'
+      - name: Check dependency compatibility
+        run: python -m pip check
+      - name: Run strict backend tests
+        run: python -m pytest
+
+  integration:
+    name: Compose and real HTTP scenarios
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      # A fresh runner and project isolate CI data from every local stand.
+      COMPOSE_PROJECT_NAME: diploma-ci-${{ github.run_id }}-${{ github.run_attempt }}
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12.14'
+          cache: pip
+          cache-dependency-path: |
+            backend/pyproject.toml
+            backend/constraints-linux.txt
+      - name: Install HTTP test dependencies
+        working-directory: backend
+        run: python -m pip install --constraint constraints-linux.txt --editable '.[test]' 'pytest==9.1.1'
+      - name: Check Docker availability
+        run: |
+          docker version
+          docker compose version
+      - name: Generate and mask disposable CI credentials
+        id: environment
+        shell: pwsh
+        run: |
+          ./scripts/prepare-local.ps1
+          foreach ($line in Get-Content -LiteralPath .env) {
+            if ($line -match '^[A-Z_]+=(.+)$') {
+              Write-Output ('::add-mask::{0}' -f $Matches[1])
+            }
+          }
+      - name: Validate Compose files without printing secrets
+        run: |
+          docker compose config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.https.yml config --quiet
+      - name: Build the backend image from scratch
+        run: docker compose build --pull backend
+      - name: Start PostgreSQL and apply bootstrap twice
+        run: |
+          docker compose up -d --wait --wait-timeout 90 postgres
+          docker compose --profile tools run --rm bootstrap
+          docker compose --profile tools run --rm bootstrap
+      - name: Start backend and verify real HTTP health
+        run: |
+          docker compose up -d --wait --wait-timeout 90 backend
+          docker compose ps
+          python - <<'PY'
+          import json
+          from urllib.request import urlopen
+          with urlopen('http://127.0.0.1:8000/health', timeout=10) as response:
+              assert response.status == 200
+              assert json.load(response) == {'status': 'ok'}
+          print('PASS: real HTTP /health')
+          PY
+      - name: Check roles, approval stages and one-time execution
+        working-directory: backend
+        run: python tests/http_scenario.py
+      - name: Check all eight mechanisms and reaction priority
+        working-directory: backend
+        run: python tests/http_mechanisms.py
+      - name: Check settings, journal and concurrent delivery
+        working-directory: backend
+        run: python tests/http_settings.py
+      - name: Check read-only sources and changed snapshots
+        working-directory: backend
+        run: |
+          python tests/http_source.py
+          python tests/http_demo_source.py
+      - name: Check expiry, cancellation and execution races
+        working-directory: backend
+        run: python tests/http_states.py
+      - name: Check registry and archived demo reset
+        working-directory: backend
+        run: python tests/http_registry_reset.py
+      - name: Check persistence after PostgreSQL and backend restart
+        working-directory: backend
+        run: python tests/http_restart.py
+      - name: Show service status
+        if: always() && steps.environment.outcome == 'success'
+        run: docker compose ps --all
+      - name: Clean up this disposable CI project
+        if: always() && steps.environment.outcome == 'success'
+        run: docker compose --profile tools down --volumes --remove-orphans
