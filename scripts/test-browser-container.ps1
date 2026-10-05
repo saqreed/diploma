@@ -6,7 +6,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $appDirectory = Split-Path -Parent $PSScriptRoot
-$reportDirectory = Join-Path (Split-Path -Parent $appDirectory) 'diploma-docs/07_reports'
+$reportDirectory = Join-Path $appDirectory 'diploma-docs/07_reports'
 $qaDirectory = Join-Path $reportDirectory '.browser-qa'
 $qaInputDirectory = Join-Path $qaDirectory 'input'
 $qaEnvironmentPath = Join-Path $qaInputDirectory '.env'
@@ -32,11 +32,12 @@ try {
     Copy-Item -LiteralPath $FixtureCache -Destination $qaFixturePath -Force
     $browserLabel = if ($Browser -eq 'chromium') {'chrome-linux'} else {'firefox-linux'}
     $browserExecutable = if ($Browser -eq 'chromium') {'/opt/qa-browsers/chrome-linux64/chrome'} else {'/opt/qa-browsers/firefox/firefox'}
-    $dockerArguments = @('run','--rm','--init','--shm-size=1g','--network',"${projectName}_default",
-        '--mount',"type=bind,source=$($appDirectory.Replace('\','/'))/frontend/dist,target=/qa/diploma-project/frontend/dist,readonly",
+    $dockerArguments = @('run','--rm','--init','--shm-size=1g','--network',"${projectName}_default",'--workdir','/qa/repository/frontend',
+        '--mount',"type=bind,source=$($appDirectory.Replace('\','/'))/frontend/dist,target=/qa/repository/frontend/dist,readonly",
+        '--mount',"type=bind,source=$($appDirectory.Replace('\','/'))/frontend/tests,target=/qa/repository/frontend/tests,readonly",
         '--mount',"type=bind,source=$($qaInputDirectory.Replace('\','/')),target=/qa/input,readonly",
         '--mount',"type=bind,source=$($qaScreenshots.Replace('\','/')),target=/qa/screenshots",
-        '--mount',"type=bind,source=$($reportDirectory.Replace('\','/')),target=/qa/diploma-docs/07_reports",
+        '--mount',"type=bind,source=$($reportDirectory.Replace('\','/')),target=/qa/repository/diploma-docs/07_reports",
         '-e','QA_ENV_FILE=/qa/input/.env','-e','QA_FIXTURE_CACHE=/qa/input/fixture.json',
         '-e',"QA_REPORT_NAME=browser-$browserLabel-$Scenario.json")
     if ($Browser -eq 'firefox') {$dockerArguments += @('-e','QA_BROWSER_CHANNEL=moz-firefox')}

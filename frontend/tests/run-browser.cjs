@@ -15,7 +15,7 @@ async function main() {
   const report = await run({playwright, browserType: process.argv[2], executablePath: process.argv[3], env, outputDirectory, fixture})
   const reportName = process.env.QA_REPORT_NAME || 'browser-' + (process.argv[4] || process.argv[2]) + '.json'
   if (path.basename(reportName) !== reportName || !reportName.endsWith('.json')) throw new Error('Invalid QA report filename')
-  await fs.writeFile(path.join('../../diploma-docs/07_reports', reportName), JSON.stringify(report, null, 2))
+  await fs.writeFile(path.join('../diploma-docs/07_reports', reportName), JSON.stringify(report, null, 2))
   console.log(JSON.stringify(report))
 }
 main().catch(error => {

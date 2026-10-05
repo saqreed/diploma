@@ -20,10 +20,10 @@ RUN curl --fail --location --retry 3 \
       "https://archive.mozilla.org/pub/firefox/releases/${QA_FIREFOX_VERSION}/linux-x86_64/en-US/firefox-${QA_FIREFOX_VERSION}.tar.xz" -o /tmp/qa-firefox.tar.xz \
     && tar -xf /tmp/qa-firefox.tar.xz -C /opt/qa-browsers \
     && rm /tmp/qa-chrome.zip /tmp/qa-firefox.tar.xz
-COPY browser-acceptance.cjs browser-editor.cjs browser-input.cjs run-browser.cjs local-qa-server.cjs /qa/diploma-project/frontend/tests/
+COPY browser-acceptance.cjs browser-editor.cjs browser-input.cjs run-browser.cjs local-qa-server.cjs /qa/repository/frontend/tests/
 ENV PLAYWRIGHT_MODULE=/qa/runtime/node_modules/playwright \
     QA_FIXTURE_CACHE=/qa/fixture.json \
     QA_SCREENSHOTS=/qa/screenshots \
     QA_BACKEND_URL=http://backend:8000
-WORKDIR /qa/diploma-project/frontend
+WORKDIR /qa/repository/frontend
 CMD ["node", "tests/local-qa-server.cjs"]

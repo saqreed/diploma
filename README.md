@@ -2,9 +2,11 @@
 
 FastAPI + React/TypeScript/Vite + PostgreSQL. Существующий каркас сохранён; прежняя тема трёхфакторной аутентификации историческая. ML, TOTP и поведенческих профилей в актуальной версии нет. Внутренние материалы диплома находятся вне приложения и не публикуются.
 
+В корне расположены `backend/` (API и движок правил), `frontend/` (интерфейс), `scripts/` (подготовка и проверки), `infra/` (HTTPS), Compose-файлы и настройки CI в `.github/`. Имя Compose `diploma-project` закреплено для сохранения существующих сетей и томов при переносе файлов.
+
 ## Локальный запуск (PowerShell 7, Docker Desktop, Node >=22.22)
 
-Из этой папки:
+Из корня репозитория (папки `backend`, `frontend`, `scripts` и Compose-файлы находятся здесь):
 
 ```powershell
 ./scripts/prepare-local.ps1
@@ -77,8 +79,10 @@ HTTPS-вход отдаёт production-сборку и настоящий API. H
 
 Если браузер не запускается в Windows, подготовлен отдельный QA-образ с Chrome for Testing 154.0.8037.92 и Firefox 157.0, без изменения контейнеров приложения. Контекст сборки — только `frontend/tests`; внутренние документы и `.env` в образ не копируются. Для запуска нужны работающий backend, `frontend/dist` после production build и приватный fixture из нагрузочного сценария (см. локальный отчёт проверок).
 
+При запуске текущие файлы тестов и production-сборка подключаются только для чтения. Уже подготовленное окружение браузеров можно использовать без пересборки; `-Build` создаёт его при первом запуске или после изменения версий окружения.
+
 ```powershell
-# Из diploma-project, по одному сценарию за раз:
+# Из корня репозитория, по одному сценарию за раз:
 ./scripts/test-browser-container.ps1 -Browser chromium -Build
 ./scripts/test-browser-container.ps1 -Browser chromium -Scenario editor
 ./scripts/test-browser-container.ps1 -Browser firefox
