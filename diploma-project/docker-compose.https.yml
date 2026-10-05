@@ -1,0 +1,24 @@
+# Optional local HTTPS entry point. It does not expose services to the LAN.
+services:
+  web:
+    image: caddy:2.11.6-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8443:8443"
+    volumes:
+      - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./frontend/dist:/srv:ro
+      - local_tls_data:/data
+      - local_tls_config:/config
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+volumes:
+  local_tls_data:
+  local_tls_config:

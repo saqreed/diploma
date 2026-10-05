@@ -38,6 +38,7 @@ def test_create_database_engine_uses_bounded_pool_settings() -> None:
         pool_recycle=900,
         pool_pre_ping=True,
         pool_use_lifo=True,
+        hide_parameters=True,
     )
 
 

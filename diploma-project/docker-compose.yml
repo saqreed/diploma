@@ -17,5 +17,48 @@ services:
       retries: 10
       start_period: 10s
 
+  backend:
+    image: ${COMPOSE_PROJECT_NAME:-diploma-project}-backend
+    build:
+      context: ./backend
+    restart: unless-stopped
+    environment:
+      DIPLOMA_DATABASE_URL: postgresql+asyncpg://diploma_antifraud:${DIPLOMA_AF_PASSWORD:?Run scripts/prepare-local.ps1}@postgres:5432/${POSTGRES_DB:-diploma}
+      DIPLOMA_DEMO_DATABASE_URL: postgresql+asyncpg://diploma_demo:${DIPLOMA_DEMO_PASSWORD:?Run scripts/prepare-local.ps1}@postgres:5432/${POSTGRES_DB:-diploma}
+      DIPLOMA_DEMO_API_KEY: ${DIPLOMA_DEMO_API_KEY:?Run scripts/prepare-local.ps1}
+      DIPLOMA_SOURCE_ENCRYPTION_KEY: ${DIPLOMA_SOURCE_ENCRYPTION_KEY:?Run scripts/prepare-local.ps1}
+      DIPLOMA_SOURCE_HOSTS: postgres
+      DIPLOMA_SOURCE_TABLES: demo.requests
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import json, urllib.request; response = urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3); assert response.status == 200 and json.load(response) == {'status': 'ok'}"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  bootstrap:
+    profiles: [tools]
+    image: ${COMPOSE_PROJECT_NAME:-diploma-project}-backend
+    command: [python, -m, app.bootstrap]
+    environment:
+      DIPLOMA_ADMIN_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-diploma}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-diploma}
+      DIPLOMA_AF_PASSWORD: ${DIPLOMA_AF_PASSWORD:?Run scripts/prepare-local.ps1}
+      DIPLOMA_DEMO_PASSWORD: ${DIPLOMA_DEMO_PASSWORD:?Run scripts/prepare-local.ps1}
+      DIPLOMA_READER_PASSWORD: ${DIPLOMA_READER_PASSWORD:?Run scripts/prepare-local.ps1}
+      DIPLOMA_SEED_PASSWORD: ${DIPLOMA_SEED_PASSWORD:?Run scripts/prepare-local.ps1}
+      DIPLOMA_DEMO_API_KEY: ${DIPLOMA_DEMO_API_KEY:?Run scripts/prepare-local.ps1}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   postgres_data:

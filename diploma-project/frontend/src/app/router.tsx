@@ -1,11 +1,11 @@
-import { createBrowserRouter } from 'react-router'
+import { createBrowserRouter, Navigate } from 'react-router'
 
 import { App } from '../App'
-import { AdminDashboardPage } from '../pages/AdminDashboardPage'
-import { DemoAppPage } from '../pages/DemoAppPage'
-import { EnrollmentPage } from '../pages/EnrollmentPage'
-import { LoginPage } from '../pages/LoginPage'
-import { TotpPage } from '../pages/TotpPage'
+import { RulesPage } from '../pages/RulesPage'
+import { ExpensesPage } from '../pages/ExpensesPage'
+import { SettingsPage } from '../pages/SettingsPage'
+import { SignInPage } from '../pages/SignInPage'
+import { JournalPage } from '../pages/JournalPage'
 
 export const applicationRouter = createBrowserRouter([
   {
@@ -14,24 +14,26 @@ export const applicationRouter = createBrowserRouter([
     children: [
       {
         path: 'login',
-        element: <LoginPage />,
+        element: <SignInPage />,
       },
       {
-        path: 'totp',
-        element: <TotpPage />,
+        path: 'journal',
+        element: <JournalPage />,
       },
       {
-        path: 'enrollment',
-        element: <EnrollmentPage />,
+        path: 'settings',
+        element: <SettingsPage />,
       },
       {
         path: 'demo',
-        element: <DemoAppPage />,
+        element: <ExpensesPage />,
       },
       {
         path: 'admin',
-        element: <AdminDashboardPage />,
+        element: <RulesPage />,
       },
+      {index: true, element: <Navigate to="/login" replace />},
+      {path: '*', element: <Navigate to="/login" replace />},
     ],
   },
 ])

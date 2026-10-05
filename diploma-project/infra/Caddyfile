@@ -1,0 +1,33 @@
+{
+	admin off
+	skip_install_trust
+	auto_https disable_redirects
+	default_sni 127.0.0.1
+}
+
+https://localhost:8443, https://127.0.0.1:8443 {
+	tls internal
+	encode gzip
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy same-origin
+		X-Frame-Options DENY
+	}
+	@api path /api/* /health /docs /openapi.json
+	handle @api {
+		reverse_proxy backend:8000 {
+			# HTTPS sessions stay Secure; direct loopback HTTP is a separate dev entry.
+			header_down Set-Cookie "^(.+)$" "$1; Secure"
+		}
+	}
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}
+
+# Container health only; no application API and no published host port.
+http://127.0.0.1:8080 {
+	respond /health "ok" 200
+}

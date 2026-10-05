@@ -22,6 +22,7 @@ def create_database_engine(settings: Settings | None = None) -> AsyncEngine:
         pool_recycle=database_settings.database_pool_recycle_seconds,
         pool_pre_ping=True,
         pool_use_lifo=True,
+        hide_parameters=True,
     )
 
 

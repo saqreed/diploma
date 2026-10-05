@@ -30,7 +30,7 @@ def test_settings_use_safe_defaults() -> None:
     """The backend starts with deterministic non-production defaults."""
     settings = Settings(_env_file=None)
 
-    assert settings.app_name == "Three-Factor Authentication API"
+    assert settings.app_name == "Система настраиваемых правил антифрода"
     assert settings.app_version == "0.1.0"
     assert settings.environment is Environment.DEVELOPMENT
     assert settings.debug is False

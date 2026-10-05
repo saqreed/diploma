@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = Field(
-        default="Three-Factor Authentication API",
+        default="Система настраиваемых правил антифрода",
         min_length=1,
     )
     app_version: str = Field(default="0.1.0", min_length=1)
