@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.models import Account, Application, Base, Expense, Migration, Rule
 from app.security import digest, hash_password
-from app.demo_seed import DEMO_CATALOG, seed_data
+from app.demo_seed import DEMO_CATALOG, DEMO_FIELDS, seed_data
 
 
 async def bootstrap():
@@ -23,6 +23,13 @@ async def bootstrap():
                 await connection.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema}"))
             await connection.execute(text("ALTER TABLE IF EXISTS antifraud.applications ADD COLUMN IF NOT EXISTS history_from timestamptz NOT NULL DEFAULT '1970-01-01T00:00:00Z'"))
             await connection.run_sync(Base.metadata.create_all)
+            for statement in (
+                "ALTER TABLE demo.requests ADD COLUMN IF NOT EXISTS category varchar NOT NULL DEFAULT 'other'",
+                "ALTER TABLE demo.requests ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT clock_timestamp()",
+                "CREATE INDEX IF NOT EXISTS ix_expense_page ON demo.requests (created_at DESC, id)",
+                "CREATE INDEX IF NOT EXISTS ix_expense_owner_status ON demo.requests (author, status)",
+            ):
+                await connection.execute(text(statement))
             statements = [
                 "GRANT USAGE ON SCHEMA antifraud TO diploma_antifraud, diploma_demo",
                 "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA antifraud TO diploma_antifraud",
@@ -73,6 +80,13 @@ async def bootstrap():
                     if await session.get(Expense, name) is None:
                         session.add(Expense(id=name, **data))
                 session.add(Migration(version=6))
+            if await session.get(Migration, 7) is None:
+                application = await session.get(Application, "demo")
+                catalog = dict(application.catalog)
+                for action in ("submit", "approve", "reject", "pay"):
+                    catalog[action] = {**catalog[action], "fields": {**catalog[action]["fields"], "category": DEMO_FIELDS["category"]}}
+                application.catalog = catalog
+                session.add(Migration(version=7))
         print("Migrations and missing educational seed applied. Existing records and credentials preserved; no secrets displayed.")
     finally:
         await engine.dispose()

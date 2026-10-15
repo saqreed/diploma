@@ -1,13 +1,14 @@
 """Demo binds API + DB fields and protects its required execution snapshot."""
 from copy import deepcopy
 from uuid import uuid4
+import os
 import httpx2 as httpx
 from dotenv import dotenv_values
 
 
 def main():
     env = dotenv_values('../.env')
-    clients = {role: httpx.Client(trust_env=False, base_url='http://127.0.0.1:8000', timeout=20,
+    clients = {role: httpx.Client(trust_env=False, base_url=os.environ.get('DIPLOMA_TEST_URL', 'http://127.0.0.1:8000'), timeout=20,
               headers={'X-Requested-With': 'antifraud-ui'}) for role in ('admin', 'employee')}
     original = None
     def call(role, path, payload=None, method='POST', expected=200):

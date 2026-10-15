@@ -1,0 +1,9 @@
+# Independent review: ALWAYS use -p diploma-review-20261008.
+# Its named volume is separate from the user's diploma-project data.
+services:
+  backend:
+    image: diploma-review-backend
+    ports: !override
+      - "127.0.0.1:28000:8000"
+  bootstrap:
+    image: diploma-review-backend

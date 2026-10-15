@@ -2,6 +2,7 @@
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
+import os
 import httpx2 as httpx
 from dotenv import dotenv_values
 
@@ -9,7 +10,7 @@ from dotenv import dotenv_values
 def main():
     env = dotenv_values('../.env')
     prefix = 'qa-rules-' + str(uuid4())[:8]
-    client = httpx.Client(trust_env=False, base_url='http://127.0.0.1:8000', timeout=20, headers={'X-Requested-With': 'antifraud-ui'})
+    client = httpx.Client(trust_env=False, base_url=os.environ.get('DIPLOMA_TEST_URL', 'http://127.0.0.1:8000'), timeout=20, headers={'X-Requested-With': 'antifraud-ui'})
     def request(path, body=None, method='POST', headers=None, expected=200):
         response = client.request(method, '/api' + path, json=body, headers=headers)
         assert response.status_code == expected, f'{path}: {response.status_code}'
@@ -61,7 +62,7 @@ def main():
         payload = {'application_id': app_id, 'operation_id': str(uuid4()), 'action': 'pay', 'initiator': 'actor', 'fields': {'object': 'o1', 'amount': 100, 'recipient': 'Alice'}}
         d = request('/checks', payload, headers=key)
         assert d['state'] == 'REJECTED' and sum(r['matched'] for r in d['reasons']) == 4
-        with httpx.Client(trust_env=False, base_url='http://127.0.0.1:8000', headers={'X-Requested-With': 'antifraud-ui'}) as specialist:
+        with httpx.Client(trust_env=False, base_url=os.environ.get('DIPLOMA_TEST_URL', 'http://127.0.0.1:8000'), headers={'X-Requested-With': 'antifraud-ui'}) as specialist:
             specialist.post('/api/auth/login', json={'username': 'specialist', 'password': env['DIPLOMA_SEED_PASSWORD']}).raise_for_status()
             assert specialist.post('/api/decisions/' + d['id'] + '/review', json={'approve': True}).status_code == 409
         for mask in range(16):

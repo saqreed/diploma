@@ -1,5 +1,6 @@
 """Run against an ephemeral backend replica with unavailable delivery URL on port 8101."""
 from uuid import uuid4
+import os
 
 import httpx2 as httpx
 from dotenv import dotenv_values
@@ -17,8 +18,10 @@ def main():
     def perform(d, client):
         return call(client, '/demo/execute', {'operation_id': d['operation_id'], 'decision_id': d['id']})
     try:
-        for name, role, port in (('employee', 'employee', 8000), ('manager', 'manager', 8000), ('accountant', 'accountant', 8000), ('outage', 'accountant', 8101)):
-            clients[name] = httpx.Client(trust_env=False, base_url=f'http://127.0.0.1:{port}', timeout=20, headers={'X-Requested-With': 'antifraud-ui'})
+        normal = os.environ.get('DIPLOMA_TEST_URL', 'http://127.0.0.1:8000')
+        outage = os.environ.get('DIPLOMA_TEST_OUTAGE_URL', 'http://127.0.0.1:8101')
+        for name, role, base in (('employee', 'employee', normal), ('manager', 'manager', normal), ('accountant', 'accountant', normal), ('outage', 'accountant', outage)):
+            clients[name] = httpx.Client(trust_env=False, base_url=base, timeout=20, headers={'X-Requested-With': 'antifraud-ui'})
             call(clients[name], '/auth/login', {'username': role, 'password': env['DIPLOMA_SEED_PASSWORD']})
         row = call(clients['employee'], '/demo/requests', {'amount': '500', 'recipient': 'Учебный получатель', 'receipt': 'qa-outbox-' + str(uuid4())[:8], 'vendor': 'QA', 'purchase_date': '2026-10-05', 'title': 'QA: потеря сообщения'})
         perform(attempt(row, 'submit', clients['employee']), clients['employee'])

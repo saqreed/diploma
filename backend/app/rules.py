@@ -245,15 +245,19 @@ def evaluate(node: dict, current: dict, history: list[dict], at: datetime, lists
     events.sort(key=lambda e: (e["event_at"], e["event_id"]))
     actual: Any = None
     extra = {}
+    include_current = bool(node.get("include_current", False))
+    if include_current and node.get("filter"):
+        include_current = evaluate(node["filter"], current, [], at, lists)[0]
+    include_current = include_current and not (operation_id and any(e.get("operation_id") == operation_id for e in events))
     if kind == "duplicate":
         matches = [e for e in events if all(name in e["fields"] and e["fields"][name] == current.get(name) for name in node["match_fields"])]
         actual, matched = len(matches), bool(matches)
     elif kind == "count":
-        actual = len(events) + int(node.get("include_current", False) and not (operation_id and any(e.get("operation_id") == operation_id for e in events)))
+        actual = len(events) + int(include_current)
         matched = compare(actual, node["op"], node["value"], True)
     elif kind == "aggregate":
         values = [e["fields"][node["field"]] for e in events if node["field"] in e["fields"]]
-        if node.get("include_current") and not (operation_id and any(e.get("operation_id") == operation_id for e in events)):
+        if include_current:
             values.append(current[node["field"]])
         actual = str(sum((number(v) for v in values), Decimal(0))) if node["aggregate"] == "sum" else len({str(v) for v in values})
         matched = compare(actual, node["op"], node["value"], True)

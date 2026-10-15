@@ -3,7 +3,7 @@ from datetime import date
 
 DEMO_FIELDS = {
     name: {"type": "number" if name in {"amount", "version"} else "string", "source": "API", "required": name != "approver"}
-    for name in ("request_id", "amount", "recipient", "author", "receipt", "vendor", "purchase_date", "title", "version", "initiator", "approver")
+    for name in ("request_id", "amount", "recipient", "author", "receipt", "vendor", "purchase_date", "title", "category", "version", "initiator", "approver")
 }
 DEMO_CATALOG = {action: {"fields": DEMO_FIELDS} for action in ("submit", "approve", "reject", "pay")}
 DEMO_CATALOG["export"] = {"fields": {

@@ -18,7 +18,9 @@ async function run({playwright, browserType, executablePath, env, outputDirector
     await ready()
     timings.push({screen: link, seconds: +( (performance.now() - started) / 1000).toFixed(4)})
   }
+  const closePanel = async () => {if (await page.getByRole('button', {name: 'Закрыть панель', exact: true}).count()) await page.getByRole('button', {name: 'Закрыть панель', exact: true}).click()}
   const login = async role => {
+    await closePanel()
     if (await page.getByRole('button', {name: 'Выйти', exact: true}).count()) {
       await page.getByRole('button', {name: 'Выйти', exact: true}).click()
     }
@@ -32,6 +34,10 @@ async function run({playwright, browserType, executablePath, env, outputDirector
     await page.goto('http://127.0.0.1:5173/login')
     await login('admin')
     await page.getByRole('heading', {name: 'Правила антифрода', exact: true}).waitFor()
+    await page.getByRole('tab', {name: 'Правила', exact: true}).press('ArrowRight')
+    assert.equal(await page.getByRole('tab', {name: 'Шаблоны', exact: true}).getAttribute('aria-selected'), 'true')
+    await page.getByRole('tab', {name: 'Шаблоны', exact: true}).press('Home')
+    assert.equal(await page.getByRole('tab', {name: 'Правила', exact: true}).getAttribute('aria-selected'), 'true')
     stage = 'rule builder and templates'
     await page.getByRole('button', {name: '+ Новое правило', exact: true}).click()
     await enterValue(page.getByLabel('Название', {exact: true}).first(), prefix + '-review')
@@ -49,6 +55,7 @@ async function run({playwright, browserType, executablePath, env, outputDirector
     const saved = page.waitForResponse(r => r.url().endsWith('/api/admin/rules') && r.request().method() === 'POST')
     await page.getByRole('button', {name: 'Сохранить правило', exact: true}).click()
     reviewId = (await (await saved).json()).id
+    await page.getByRole('tab', {name: 'Шаблоны', exact: true}).click()
     await page.getByRole('heading', {name: 'Сохранённые шаблоны', exact: true}).waitFor()
     await page.locator('.list-row').filter({hasText: prefix + '-review'}).getByRole('button', {name: 'Создать правило', exact: true}).click()
     await enterValue(page.getByLabel('Название', {exact: true}).first(), prefix + '-confirm')
@@ -57,7 +64,8 @@ async function run({playwright, browserType, executablePath, env, outputDirector
     await page.getByRole('button', {name: 'Сохранить правило', exact: true}).click()
     confirmationId = (await (await second).json()).id
     stage = 'watchlist'
-    await page.getByRole('heading', {name: 'Активные настройки', exact: true}).waitFor()
+    await page.getByRole('tab', {name: 'Списки наблюдения', exact: true}).click()
+    await page.getByRole('heading', {name: 'Списки наблюдения', exact: true}).waitFor()
     await enterValue(page.getByLabel('Название', {exact: true}), prefix + '-list')
     await enterValue(page.getByLabel('Значения через запятую', {exact: true}), 'Alice, Bob')
     await page.getByRole('button', {name: 'Добавить список', exact: true}).click()
@@ -94,33 +102,45 @@ async function run({playwright, browserType, executablePath, env, outputDirector
     await page.getByRole('button', {name: 'Сохранить каталог', exact: true}).click()
     const createdApp = await (await appSaved).json()
     await page.getByRole('button', {name: 'Скрыть', exact: true}).click()
+    await page.getByRole('tab', {name: 'Источники данных', exact: true}).click()
     const sourceForm = page.locator('form').filter({has: page.getByRole('heading', {name: 'Источник PostgreSQL · только чтение', exact: true})})
     await sourceForm.getByLabel('Приложение', {exact: true}).selectOption(prefix)
-    await enterValue(page.getByLabel('URL подключения', {exact: true}), 'postgresql+asyncpg://diploma_reader:' + env.DIPLOMA_READER_PASSWORD + '@postgres:5432/' + (env.POSTGRES_DB || 'diploma'))
+    await enterValue(page.getByLabel('Сервер БД', {exact: true}), 'postgres')
+    await enterValue(page.getByLabel('База данных', {exact: true}), env.POSTGRES_DB || 'diploma')
+    await enterValue(page.getByLabel('Пользователь только для чтения', {exact: true}), 'diploma_reader')
+    await enterValue(page.getByLabel('Пароль подключения', {exact: true}), env.DIPLOMA_READER_PASSWORD)
     await enterValue(page.getByLabel('Разрешённые столбцы через запятую', {exact: true}), 'amount')
-    await enterValue(sourceForm.locator('textarea'), 'cost=amount')
+    await page.getByRole('button', {name: '+ Поле из БД', exact: true}).click()
+    await page.getByLabel('Поле проверки', {exact: true}).selectOption('cost')
+    await page.getByLabel('Столбец БД', {exact: true}).selectOption('amount')
     await page.getByRole('button', {name: 'Сохранить источник', exact: true}).click()
     await page.getByText('Источник сохранён. Пароль не отображается повторно.', {exact: true}).waitFor()
-    assert.equal(await page.getByLabel('URL подключения', {exact: true}).inputValue(), '')
+    assert.equal(await page.getByLabel('Пароль подключения', {exact: true}).inputValue(), '')
     stage = 'employee creates and submits'
     await login('employee')
     await page.getByRole('button', {name: '+ Новая заявка', exact: true}).click()
     for (const [name, value] of Object.entries({'Назначение': prefix, 'Получатель': 'Учебный получатель', 'Номер чека': prefix, 'Продавец': 'QA'})) {
       await enterValue(page.getByLabel(name, {exact: true}), value)
     }
-    await page.getByRole('button', {name: 'Сохранить', exact: true}).click()
+    await page.getByRole('button', {name: 'Сохранить черновик', exact: true}).click()
     const expenseRow = page.getByRole('row').filter({hasText: prefix})
-    await expenseRow.getByRole('button', {name: 'Отправить', exact: true}).click()
-    await page.getByRole('button', {name: 'Выполнить: Отправка на согласование', exact: true}).click()
-    await expenseRow.getByText('На согласовании', {exact: true}).waitFor()
+    await enterValue(page.getByLabel('Поиск заявок', {exact: true}), prefix)
+    await page.waitForFunction(() => document.querySelectorAll('tbody tr').length === 1)
+    assert.equal(await page.locator('tbody tr').count(), 1)
+    await enterValue(page.getByLabel('Поиск заявок', {exact: true}), '')
+    await expenseRow.getByRole('button', {name: 'Отправить на согласование', exact: true}).click()
+    await page.getByRole('heading', {name: 'Заявка: Ожидает согласования руководителя', exact: true}).waitFor()
+    await closePanel()
+    await expenseRow.getByText('Ожидает согласования руководителя', {exact: true}).waitFor()
+    await page.screenshot({path: path.join(outputDirectory, browserType + '-submitted.png'), fullPage: true})
     stage = 'manager approval'
     await login('manager')
     await expenseRow.getByRole('button', {name: 'Согласовать', exact: true}).click()
-    await page.getByRole('button', {name: 'Выполнить: Согласование', exact: true}).click()
-    await expenseRow.getByText('Согласовано руководителем', {exact: true}).waitFor()
+    await page.getByRole('heading', {name: 'Заявка: Согласовано руководителем', exact: true}).waitFor()
+    await closePanel()
     stage = 'accountant requests review and confirmation'
     await login('accountant')
-    await expenseRow.getByRole('button', {name: 'Проверить выплату', exact: true}).click()
+    await expenseRow.getByRole('button', {name: 'Отметить условную выплату', exact: true}).click()
     await page.locator('.decision').getByText('Ручная проверка', {exact: true}).first().waitFor()
     const recent = await page.request.get('http://127.0.0.1:5173/api/demo/decisions')
     const attempts = await recent.json()
@@ -128,6 +148,7 @@ async function run({playwright, browserType, executablePath, env, outputDirector
     assert(pending)
     stage = 'specialist review'
     await login('specialist')
+    await page.getByText('Дополнительные фильтры', {exact: true}).click()
     await enterValue(page.getByLabel('Идентификатор операции', {exact: true}), pending.operation_id)
     const filtered = page.waitForResponse(r => r.url().includes('/api/journal?') && r.url().includes(pending.operation_id))
     await page.getByRole('button', {name: 'Применить фильтры', exact: true}).click()
@@ -139,23 +160,34 @@ async function run({playwright, browserType, executablePath, env, outputDirector
     await page.screenshot({path: path.join(outputDirectory, browserType + '-review.png'), fullPage: true})
     stage = 'initiator confirmation and safe execution'
     await login('accountant')
-    await page.locator('.list-row').filter({hasText: pending.operation_id}).getByRole('button', {name: 'Открыть', exact: true}).click()
-    await page.getByRole('button', {name: 'Подтверждаю эти значения', exact: true}).click()
-    await page.getByRole('button', {name: 'Выполнить: Условная выплата', exact: true}).click()
+    await page.getByRole('button', {name: 'Нужно моё подтверждение', exact: true}).click()
+    await expenseRow.getByRole('button', {name: 'Подробнее', exact: true}).click()
+    await page.getByRole('button', {name: 'Подтверждаю эти значения и действие', exact: true}).click()
+    await page.getByText('Действие уже сохранено', {exact: true}).waitFor()
+    await closePanel()
+    await page.getByRole('button', {name: 'Все доступные', exact: true}).click()
     await expenseRow.getByText('Выплачено условно', {exact: true}).waitFor()
-    await page.getByText('Действие сохранено; отдельное событие записано в историю.', {exact: true}).waitFor()
     // The GUI source maps a new domain name to the allowed DB column.
     const own = await (await page.request.get('http://127.0.0.1:5173/api/demo/requests')).json()
     assert.equal(own.find(r => r.title === prefix).recipient, 'Учебный получатель')
     const sourceCheck = await page.request.post('http://127.0.0.1:5173/api/checks', {headers: {'X-Application-Key': createdApp.api_key}, data: {application_id: prefix, operation_id: prefix, action: 'operation', initiator: 'browser', record_key: own.find(r => r.title === prefix).id, fields: {cost: 999}}})
     assert.equal(sourceCheck.status(), 200)
     assert.equal((await sourceCheck.json()).checked_values.cost, '500')
-    stage = 'registry download and history'
-    await expenseRow.getByRole('button', {name: 'История', exact: true}).click()
-    await page.getByRole('heading', {name: 'История: ' + prefix, exact: true}).waitFor()
-    await page.getByRole('button', {name: 'Выгрузить реестр', exact: true}).click()
+    stage = 'history button ready after payment'
+    await closePanel()
+    const historyButton = expenseRow.getByRole('button', {name: 'Подробнее', exact: true})
+    // press() does not wait for an enabled control, unlike click().
+    await page.waitForFunction(title => [...document.querySelectorAll('tbody tr')]
+      .find(row => row.innerText.includes(title))?.querySelector('button')?.disabled === false, prefix)
+    stage = 'keyboard opens request history'
+    await historyButton.press('Enter')
+    await page.getByRole('heading', {name: 'История заявки', exact: true}).waitFor()
+    await page.getByRole('button', {name: 'Закрыть панель', exact: true}).press('Escape')
+    await page.getByRole('dialog').waitFor({state: 'hidden'})
+    assert(await historyButton.evaluate(button => document.activeElement === button))
+    stage = 'registry download'
     const download = page.waitForEvent('download')
-    await page.getByRole('button', {name: 'Выполнить: Выгрузка реестра', exact: true}).click()
+    await page.getByRole('button', {name: 'Выгрузить реестр', exact: true}).click()
     assert.equal((await download).suggestedFilename(), 'реестр.csv')
     await page.screenshot({path: path.join(outputDirectory, browserType + '-expenses.png'), fullPage: true})
     stage = 'screen timings with 10000 events and 20 rules'
@@ -184,6 +216,7 @@ async function run({playwright, browserType, executablePath, env, outputDirector
     return {browser: executablePath.includes('Edge') ? 'Microsoft Edge' : browserType === 'chromium' ? 'Chrome for Testing' : 'Firefox', engine: browserType, version: browser.version(), platform: process.platform, viewport: '1440x1000', production_build: true,
             flow: 'admin rules/template/list/catalog/DB source; employee submit; manager approve; accountant review+confirmation+pay+registry; saved journal',
             catalog_keyboard_rename: true, duplicate_field_name_rejected: true, adding_after_removal_preserves_fields: true,
+            keyboard_tabs: true, expense_search: true, panel_escape_restores_focus: true,
             javascript_errors: errors.length, timings, all_screens_within_two_seconds: timings.every(t => t.seconds <= 2)}
   } catch (error) {
     await page.screenshot({path: path.join(outputDirectory, browserType + '-failure.png'), fullPage: true,

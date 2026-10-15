@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 
+import os
 import httpx2 as httpx
 from dotenv import dotenv_values
 
@@ -10,7 +11,7 @@ from dotenv import dotenv_values
 def main():
     env = dotenv_values('../.env')
     prefix = 'qa-settings-' + str(uuid4())[:8]
-    with httpx.Client(trust_env=False, base_url='http://127.0.0.1:8000', timeout=20,
+    with httpx.Client(trust_env=False, base_url=os.environ.get('DIPLOMA_TEST_URL', 'http://127.0.0.1:8000'), timeout=20,
                       headers={'X-Requested-With': 'antifraud-ui'}) as admin:
         def call(path, body=None, method='POST', key=None, expected=200):
             response = admin.request(method, '/api' + path, json=body, headers={'X-Application-Key': key} if key else None)

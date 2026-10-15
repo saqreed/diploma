@@ -1,7 +1,8 @@
 /* Optional QA runner: Playwright installed in a separate local validation environment. */
 const fs = require('node:fs/promises')
 const path = require('node:path')
-const {run} = require(process.argv[4] === 'editor' ? './browser-editor.cjs' : './browser-acceptance.cjs')
+const scenario = process.argv[4] || 'flow'
+const {run} = require(scenario === 'editor' ? './browser-editor.cjs' : scenario === 'review' ? './browser-review.cjs' : './browser-acceptance.cjs')
 
 async function main() {
   const playwright = require(process.env.PLAYWRIGHT_MODULE || 'playwright')

@@ -163,3 +163,20 @@ def test_demo_bindings_cannot_be_removed_from_catalog():
 def test_malformed_settings_have_a_validation_error(node):
     with pytest.raises(RuleError):
         validate_expression(node, FIELDS, CATALOG)
+
+
+@pytest.mark.parametrize('kind,extra', [('count', {}), ('aggregate', {'aggregate': 'sum', 'field': 'amount'})])
+def test_current_operation_obeys_field_filter(kind, extra):
+    node = historical(kind, include_current=True, op='ge', value=1,
+                      filter={'kind': 'field', 'field': 'recipient', 'op': 'eq', 'value': 'Alice'}, **extra)
+    validate_expression(node, FIELDS, CATALOG)
+    flag, trace = evaluate(node, {**CURRENT, 'recipient': 'Bob'}, [], NOW, operation_id='op')
+    assert not flag and str(trace['actual']) == '0'
+    assert evaluate(node, CURRENT, [], NOW, operation_id='op')[0]
+
+
+def test_whitespace_expense_is_not_a_valid_document():
+    from app.contracts import ExpenseInput
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        ExpenseInput(amount='500', recipient=' ', receipt=' ', vendor=' ', purchase_date='2026-10-08', title=' ')

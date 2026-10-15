@@ -1,10 +1,14 @@
 param(
     [ValidateSet('chromium', 'firefox')][string]$Browser = 'chromium',
-    [ValidateSet('flow', 'editor')][string]$Scenario = 'flow',
+    [ValidateSet('flow', 'editor', 'review')][string]$Scenario = 'flow',
     [string]$FixtureCache = (Join-Path $env:LOCALAPPDATA 'DiplomaValidation/performance/fixture.json'),
-    [switch]$Build
+    [switch]$Build,
+    [switch]$SkipDemoReset,
+    [ValidatePattern('^diploma-review-20261008$')][string]$ReviewProject,
+    [string]$ReportPrefix = 'browser'
 )
 $ErrorActionPreference = 'Stop'
+if ($Scenario -eq 'review' -and !$ReviewProject) {throw 'Negative review scenario requires the isolated review project.'}
 $appDirectory = Split-Path -Parent $PSScriptRoot
 $reportDirectory = Join-Path $appDirectory 'diploma-docs/07_reports'
 $qaDirectory = Join-Path $reportDirectory '.browser-qa'
@@ -21,7 +25,7 @@ try {
         docker build -t diploma-browser-qa -f frontend/tests/Dockerfile.browser frontend/tests
         if ($LASTEXITCODE -ne 0) {throw 'QA image build failed.'}
     }
-    $backendId = docker compose ps -q backend
+    $backendId = if ($ReviewProject) { docker compose -p $ReviewProject -f docker-compose.yml -f docker-compose.review.yml ps -q backend } else { docker compose ps -q backend }
     if (!$backendId) {throw 'Start the existing backend and PostgreSQL first.'}
     $projectName = docker inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' $backendId
     if ($LASTEXITCODE -ne 0) {throw 'Cannot identify the local Compose network.'}
@@ -39,10 +43,12 @@ try {
         '--mount',"type=bind,source=$($qaScreenshots.Replace('\','/')),target=/qa/screenshots",
         '--mount',"type=bind,source=$($reportDirectory.Replace('\','/')),target=/qa/repository/diploma-docs/07_reports",
         '-e','QA_ENV_FILE=/qa/input/.env','-e','QA_FIXTURE_CACHE=/qa/input/fixture.json',
-        '-e',"QA_REPORT_NAME=browser-$browserLabel-$Scenario.json")
+        '-e',"QA_REPORT_NAME=$ReportPrefix-$browserLabel-$Scenario.json")
+    if ($SkipDemoReset) {$dockerArguments += @('-e','QA_SKIP_DEMO_RESET=1')}
+    if ($ReviewProject) {$dockerArguments += @('-e','QA_ISOLATED_REVIEW=1')}
     if ($Browser -eq 'firefox') {$dockerArguments += @('-e','QA_BROWSER_CHANNEL=moz-firefox')}
     $dockerArguments += @('diploma-browser-qa','node','tests/local-qa-server.cjs',$Browser,$browserExecutable)
-    if ($Scenario -eq 'editor') {$dockerArguments += 'editor'}
+    if ($Scenario -ne 'flow') {$dockerArguments += $Scenario}
     & docker @dockerArguments
     if ($LASTEXITCODE -ne 0) {throw 'Browser acceptance failed; see its safe stage message.'}
 } finally {

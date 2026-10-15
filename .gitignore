@@ -26,5 +26,10 @@ __pycache__/
 *.log
 .DS_Store
 Thumbs.db
+desktop.ini
 .idea/
 .vscode/
+
+# Local exploratory audit files; reproducible checks use docker-compose.review.yml.
+/docker-compose.audit.yml
+/scripts/audit-baseline.py

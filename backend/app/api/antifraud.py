@@ -3,7 +3,7 @@ import os
 import secrets
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, Header, Request, Response
+from fastapi import APIRouter, Depends, Header, Query, Request, Response
 from sqlalchemy import case, delete, select, func
 
 from app.access import application_access, require, user
@@ -125,11 +125,14 @@ async def update_application(application_id: str, payload: ApplicationInput, acc
         application = await session.get(Application, application_id)
         if not application:
             raise DomainError("application_missing", "Приложение не найдено", 404)
-        # Existing enabled rules must remain valid when the catalog changes.
+        # Retained rules and templates must stay editable, including disabled ones.
         lists = {w.id: w.values for w in (await session.scalars(select(Watchlist).where(Watchlist.application_id == application_id))).all()}
-        for rule in (await session.scalars(select(Rule).where(Rule.application_id == application_id, Rule.enabled.is_(True)))).all():
+        retained = []
+        for model in (Rule, Template):
+            retained.extend((await session.scalars(select(model).where(model.application_id == application_id))).all())
+        for rule in retained:
             if rule.action not in payload.catalog:
-                raise RuleError("Отключите правила удаляемого типа события")
+                raise RuleError("Сначала удалите или перенастройте правила и шаблоны этого типа события, включая отключённые")
             validate_expression(rule.expression, payload.catalog[rule.action]["fields"], payload.catalog, lists=lists)
             if rule.exception:
                 validate_expression(rule.exception, payload.catalog[rule.action]["fields"], payload.catalog, lists=lists)
@@ -248,6 +251,8 @@ async def update_list(list_id: str, payload: WatchlistInput, account=Depends(use
         application = await session.get(Application, row.application_id)
         for model in (Rule, Template):
             for item in (await session.scalars(select(model).where(model.application_id == row.application_id))).all():
+                if item.action not in application.catalog:
+                    raise RuleError("Перенастройте правило или шаблон: его тип события удалён из каталога")
                 config = application.catalog[item.action]["fields"]
                 validate_expression(item.expression, config, application.catalog, lists=values)
                 if item.exception:
@@ -472,10 +477,10 @@ async def cancel(decision_id: str, account=Depends(user)):
 
 
 @router.get("/demo/requests")
-async def demo_requests(account=Depends(user)):
+async def demo_requests(limit: int = Query(100, ge=1, le=200), offset: int = Query(0, ge=0), account=Depends(user)):
     require(account, "employee", "manager", "accountant")
     async with demo_sessions()() as session:
-        query = select(Expense).order_by(Expense.id)
+        query = select(Expense).order_by(Expense.created_at.desc(), Expense.id).limit(limit).offset(offset)
         if account.role == "employee":
             query = query.where(Expense.author == account.id)
         return [expense_view(row) for row in (await session.scalars(query)).all()]
@@ -508,7 +513,17 @@ async def edit_expense(expense_id: str, payload: ExpenseInput, account=Depends(u
         row.version += 1
         row.status, row.approver, row.approved_version = "DRAFT", None, None
         row.history = [*row.history, {"action": "edited", "actor": account.id, "at": (await db_time(session)).isoformat(), "before": before, "version": row.version}]
-        return expense_view(row)
+        result = expense_view(row)
+    # Release the expense lock before acquiring decision locks (execution takes them in that order).
+    # Any concurrent execution after the edit must independently reject the changed snapshot.
+    async with antifraud_sessions().begin() as session:
+        decisions = (await session.scalars(select(Decision).where(Decision.application_id == "demo", Decision.record_key == expense_id,
+                     Decision.executed_at.is_(None), Decision.state.not_in(TERMINAL)).order_by(Decision.id).with_for_update())).all()
+        for decision in decisions:
+            await expire(session, decision)
+            if decision.state not in TERMINAL:
+                transition(session, decision, "CANCELLED", account.id, "Заявка изменена; требуется новая проверка актуальной версии")
+    return result
 
 
 @router.post("/demo/requests/{expense_id}/check")
@@ -518,6 +533,8 @@ async def demo_check(expense_id: str, payload: DemoCheck, account=Depends(user))
         if row is None:
             raise DomainError("request_missing", "Заявка не найдена", 404)
         authorize_action(account, row, payload.action)
+        if payload.version is not None and row.version != payload.version:
+            raise DomainError("data_changed", "Заявка изменена. Откройте актуальные значения перед действием")
         values = fields(row, account.id)
     return await antifraud_call("/api/checks", {"application_id": "demo", "operation_id": payload.operation_id, "action": payload.action,
                                               "initiator": account.id, "record_key": expense_id, "fields": values})

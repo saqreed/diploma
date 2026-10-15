@@ -9,6 +9,7 @@ from pathlib import Path
 import time
 from uuid import uuid4
 
+import os
 import httpx2 as httpx
 from dotenv import dotenv_values
 
@@ -16,7 +17,7 @@ from dotenv import dotenv_values
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--env-file', default='../.env')
-    parser.add_argument('--url', default='http://127.0.0.1:8000')
+    parser.add_argument('--url', default=os.environ.get('DIPLOMA_TEST_URL', 'http://127.0.0.1:8000'))
     args = parser.parse_args()
     env = dotenv_values(Path(args.env_file))
     clients = {}

@@ -76,6 +76,15 @@ class ExpenseInput(Input):
     vendor: str = Field(min_length=1, max_length=100)
     purchase_date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
     title: str = Field(min_length=1, max_length=200)
+    category: Literal["office", "transport", "other"] = "other"
+
+    @field_validator("recipient", "receipt", "vendor", "title")
+    @classmethod
+    def meaningful_text(cls, value):
+        value = value.strip()
+        if not value:
+            raise ValueError("Поле не может состоять только из пробелов")
+        return value
 
     @field_validator("purchase_date")
     @classmethod
@@ -87,6 +96,7 @@ class ExpenseInput(Input):
 class DemoCheck(Input):
     operation_id: str = Field(min_length=1, max_length=100)
     action: Literal["submit", "approve", "reject", "pay"]
+    version: int | None = Field(default=None, ge=1)
 
 
 class ExecuteInput(Input):

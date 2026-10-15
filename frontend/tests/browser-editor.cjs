@@ -43,6 +43,11 @@ async function run({playwright, browserType, executablePath, env, outputDirector
       await page.getByLabel('Механизм',{exact:true}).selectOption(kind)
       await enterValue(page.getByLabel('Название',{exact:true}).first(), prefix + '-' + kind)
       await page.getByLabel('Правило включено',{exact:true}).uncheck()
+      if (kind === 'field') {
+        await page.getByRole('tab', {name: 'Шаблоны', exact: true}).click()
+        await page.getByRole('tab', {name: 'Правила', exact: true}).click()
+        assert.equal(await page.getByLabel('Название', {exact:true}).first().inputValue(), prefix + '-field')
+      }
       if (kind === 'count') {
         await enterValue(page.getByLabel('Период, секунды',{exact:true}), '0')
         await page.getByRole('button',{name:'Сохранить правило',exact:true}).click()
@@ -75,6 +80,7 @@ async function run({playwright, browserType, executablePath, env, outputDirector
     await page.getByRole('button',{name:'Сохранить как новый шаблон',exact:true}).click()
     await page.getByText('Создан самостоятельный шаблон.',{exact:true}).waitFor()
     await page.getByRole('button',{name:'Закрыть',exact:true}).click()
+    await page.getByRole('tab', {name: 'Шаблоны', exact: true}).click()
     const templateRow = page.locator('.list-row').filter({hasText:prefix + '-boolean'})
     await templateRow.getByRole('button',{name:'Изменить шаблон',exact:true}).click()
     await enterValue(page.getByLabel('Название',{exact:true}).first(), prefix + '-template-v2')
@@ -86,12 +92,14 @@ async function run({playwright, browserType, executablePath, env, outputDirector
     await enterValue(page.getByLabel('Название',{exact:true}).first(), prefix + '-copy')
     await page.getByLabel('Правило включено',{exact:true}).uncheck()
     await save()
+    await page.getByRole('tab', {name: 'Шаблоны', exact: true}).click()
     await edited.getByRole('button',{name:'Удалить',exact:true}).click()
     await edited.waitFor({state:'hidden'})
     const rules = await call('/admin/rules?application_id=' + prefix,undefined,'GET')
     assert.equal(rules.find(r => r.id === rule.id).expression.value,true)
     assert.equal(rules.find(r => r.name === prefix + '-copy').expression.value,false)
     stage = 'boolean watchlist edit/delete'
+    await page.getByRole('tab', {name: 'Списки наблюдения', exact: true}).click()
     await enterValue(page.getByLabel('Название',{exact:true}), prefix + '-list')
     await page.getByLabel('Тип значений',{exact:true}).selectOption('boolean')
     await enterValue(page.getByLabel('Значения через запятую',{exact:true}), 'true, false')
@@ -105,16 +113,19 @@ async function run({playwright, browserType, executablePath, env, outputDirector
     await listRow.waitFor({state:'hidden'})
     stage = 'explicit demo reset button'
     await page.getByRole('link',{name:'Приложения и источники',exact:true}).click()
+    await page.getByRole('tab', {name: 'Учебные данные', exact: true}).click()
     const reset = page.getByRole('button',{name:'Вернуть демо',exact:true})
     assert(await reset.isDisabled())
     await enterValue(page.getByLabel('Подтверждение возврата',{exact:true}), 'Вернуть учебное демо')
-    await reset.click()
-    await page.getByText('Учебные заявки восстановлены; прежние данные и журнал сохранены',{exact:true}).waitFor()
+    if (process.env.QA_SKIP_DEMO_RESET !== '1') {
+      await reset.click()
+      await page.getByText('Учебные заявки восстановлены; прежние данные и журнал сохранены',{exact:true}).waitFor()
+    } else {assert(await reset.isEnabled())}
     await page.screenshot({path:path.join(outputDirectory,'editor-reset.png'),fullPage:true})
     assert.equal(errors.length,0)
     return {browser:executablePath.includes('Edge') ? 'Microsoft Edge' : browserType === 'chromium' ? 'Chrome for Testing' : 'Firefox',version:browser.version(),platform:process.platform,mechanism_forms:kinds,invalid_period_retains_input:true,
-            invalid_type_retains_input:true,boolean_rule_checks:true,template_edit_copy_delete:true,watchlist_edit_delete:true,
-            explicit_reset:true,javascript_errors:errors.length}
+            invalid_type_retains_input:true,tab_switch_retains_draft:true,boolean_rule_checks:true,template_edit_copy_delete:true,watchlist_edit_delete:true,
+            explicit_reset:process.env.QA_SKIP_DEMO_RESET !== '1',javascript_errors:errors.length}
   } catch(error) {
     throw new Error('Browser QA failed at ' + stage + ': ' + error.message.split('\n')[0])
   } finally {await browser.close()}

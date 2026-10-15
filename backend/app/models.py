@@ -160,6 +160,8 @@ class Expense(Base):
     approver = Column(String)
     approved_version = Column(Integer)
     history = Column(JSON, nullable=False, default=list)
+    category = Column(String, nullable=False, default="other")
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
 
 
 class Execution(Base):

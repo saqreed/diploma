@@ -24,17 +24,18 @@ def validate_demo_catalog(catalog):
                 raise RuleError(f"Демо требует поле {name} типа {spec['type']} для действия {action}; его нельзя убрать или изменить")
 
 
-def expense_view(row):
+def expense_view(row, include_history=True):
     return {"id": row.id, "author": row.author, "amount": str(row.amount), "recipient": row.recipient,
             "receipt": row.receipt, "vendor": row.vendor, "purchase_date": row.purchase_date, "title": row.title,
             "version": row.version, "status": row.status, "approver": row.approver,
-            "approved_version": row.approved_version, "history": row.history}
+            "approved_version": row.approved_version, "category": row.category,
+            "created_at": row.created_at.isoformat(), **({"history": row.history} if include_history else {})}
 
 
 def fields(row, actor):
     return {"request_id": row.id, "author": row.author, "amount": str(row.amount), "recipient": row.recipient,
             "receipt": row.receipt, "vendor": row.vendor, "purchase_date": row.purchase_date, "title": row.title,
-            "version": row.version, "initiator": actor, **({"approver": row.approver} if row.approver else {})}
+            "category": row.category, "version": row.version, "initiator": actor, **({"approver": row.approver} if row.approver else {})}
 
 
 def authorize_action(account, row, action):

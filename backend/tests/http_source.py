@@ -2,6 +2,7 @@
 from time import perf_counter
 from uuid import uuid4
 
+import os
 import httpx2 as httpx
 from dotenv import dotenv_values
 
@@ -9,8 +10,8 @@ from dotenv import dotenv_values
 def main():
     env = dotenv_values('../.env')
     prefix = 'qa-db-' + str(uuid4())[:8]
-    admin = httpx.Client(trust_env=False, base_url='http://127.0.0.1:8000', timeout=20, headers={'X-Requested-With': 'antifraud-ui'})
-    employee = httpx.Client(trust_env=False, base_url='http://127.0.0.1:8000', timeout=20, headers={'X-Requested-With': 'antifraud-ui'})
+    admin = httpx.Client(trust_env=False, base_url=os.environ.get('DIPLOMA_TEST_URL', 'http://127.0.0.1:8000'), timeout=20, headers={'X-Requested-With': 'antifraud-ui'})
+    employee = httpx.Client(trust_env=False, base_url=os.environ.get('DIPLOMA_TEST_URL', 'http://127.0.0.1:8000'), timeout=20, headers={'X-Requested-With': 'antifraud-ui'})
     def call(client, path, payload=None, method='POST', headers=None, expected=200):
         response = client.request(method, '/api' + path, json=payload, headers=headers)
         assert response.status_code == expected, f'{path}: {response.status_code}'

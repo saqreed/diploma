@@ -1,6 +1,7 @@
 """Registry snapshot binding, saved replay and explicit demo reset with durable archive."""
 from uuid import uuid4
 
+import os
 import httpx2 as httpx
 from dotenv import dotenv_values
 
@@ -14,7 +15,7 @@ def main():
         return r.json()
     try:
         for role in ('admin', 'employee', 'accountant'):
-            clients[role] = httpx.Client(trust_env=False, base_url='http://127.0.0.1:8000', timeout=20, headers={'X-Requested-With': 'antifraud-ui'})
+            clients[role] = httpx.Client(trust_env=False, base_url=os.environ.get('DIPLOMA_TEST_URL', 'http://127.0.0.1:8000'), timeout=20, headers={'X-Requested-With': 'antifraud-ui'})
             call(role, '/auth/login', {'username': role, 'password': env['DIPLOMA_SEED_PASSWORD']})
         def export():
             return call('accountant', '/demo/export/check', {'operation_id': str(uuid4())})

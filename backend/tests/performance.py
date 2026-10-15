@@ -11,6 +11,7 @@ from statistics import mean
 from time import perf_counter, sleep
 from uuid import uuid4
 
+import os
 import httpx2 as httpx
 from dotenv import dotenv_values
 
@@ -27,7 +28,7 @@ def main():
     args = parser.parse_args()
     env = dotenv_values('../.env')
     prefix = 'qa-load-' + str(uuid4())[:8]
-    client = httpx.Client(trust_env=False, base_url='http://127.0.0.1:8000', timeout=30, headers={'X-Requested-With': 'antifraud-ui'}, limits=httpx.Limits(max_connections=20))
+    client = httpx.Client(trust_env=False, base_url=os.environ.get('DIPLOMA_TEST_URL', 'http://127.0.0.1:8000'), timeout=30, headers={'X-Requested-With': 'antifraud-ui'}, limits=httpx.Limits(max_connections=20))
     def post(path, payload, key=None):
         response = client.post('/api' + path, json=payload, headers={'X-Application-Key': key} if key else None)
         if response.status_code != 200:
