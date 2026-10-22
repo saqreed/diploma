@@ -58,14 +58,19 @@ async function run({playwright, browserType, executablePath, env, outputDirector
       await save()
       await page.getByRole('row').filter({hasText:prefix + '-' + kind}).waitFor()
     }
-    stage = 'boolean value and retained server validation error'
+    stage = 'typed comparison and retained server validation error'
     await page.getByRole('button',{name:'+ Новое правило',exact:true}).click()
     await enterValue(page.getByLabel('Название',{exact:true}).first(), prefix + '-boolean')
     await page.getByLabel('Поле',{exact:true}).selectOption('flag')
+    assert.equal(await page.getByLabel('Сравнение',{exact:true}).inputValue(),'eq')
+    assert.equal(await page.getByLabel('Сравнение',{exact:true}).locator('option[value="gt"]').count(),0)
+    // Keep a real server-validation error reachable through valid UI controls.
+    await page.getByLabel('Сравнение',{exact:true}).selectOption('in')
+    await enterValue(page.getByLabel('Значения через запятую',{exact:true}),'not-a-boolean')
     const invalid = page.waitForResponse(r => r.url().endsWith('/api/admin/rules') && r.request().method() === 'POST')
     await page.getByRole('button',{name:'Сохранить правило',exact:true}).click()
     assert.equal((await invalid).status(),422)
-    await page.getByText('Сравнение больше/меньше допускается только для числа',{exact:true}).waitFor()
+    await page.getByText('Значение условия не соответствует типу поля',{exact:true}).waitFor()
     assert.equal(await page.getByLabel('Название',{exact:true}).first().inputValue(),prefix + '-boolean')
     await page.getByLabel('Сравнение',{exact:true}).selectOption('eq')
     await page.getByLabel('Значение / порог',{exact:true}).selectOption('true')

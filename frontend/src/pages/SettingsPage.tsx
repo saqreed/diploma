@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { Navigate } from 'react-router'
-import { api, fieldLabel, type Application, type Field } from '../api'
+import { api, fieldLabel, label, type Application, type Field } from '../api'
 import { useSession } from '../session'
 import { TabBar } from '../components/TabBar'
 type Source = {
@@ -8,6 +8,8 @@ type Source = {
   key_field: string
   allowed_fields: string[]
   mapping: Record<string, string>
+  credentials_saved?: boolean
+  connection?: {host: string;port: string;database: string;user: string}
 }
 const emptyApp: Application = {
   id: '',
@@ -39,7 +41,19 @@ export function SettingsPage() {
   const [mapping, setMapping] = useState('amount=amount\nrecipient=recipient')
   const [resetPhrase, setResetPhrase] = useState('')
   const [sourceLoading, setSourceLoading] = useState(false)
+  const [sourceReady, setSourceReady] = useState(false)
+  const [connectionDirty, setConnectionDirty] = useState(false)
+  const [testKey, setTestKey] = useState('')
+  const [testResult, setTestResult] = useState('')
+  const [testSignature, setTestSignature] = useState('')
+  const [pending, setPending] = useState(false)
+  const busy = useRef(false)
   const sourceRequest = useRef(0)
+  const sourceSignature=JSON.stringify({source,connection,url,mapping,testKey,sourceApp})
+  const sourceFeedback=useRef<HTMLDivElement>(null)
+  useEffect(()=>{
+    if(tab === 'sources' && (error || testResult)) sourceFeedback.current?.scrollIntoView({block:'nearest'})
+  },[tab,error,testResult])
   const load = useCallback(async () => {
     setApps(await api<Application[]>('/admin/applications'))
   }, [])
@@ -54,7 +68,8 @@ export function SettingsPage() {
   if (account.role !== 'admin') return <p>Настройки доступны администратору.</p>
   async function save(e: FormEvent) {
     e.preventDefault()
-    if (!draft) return
+    if (!draft || busy.current) return
+    busy.current=true;setPending(true)
     setError('')
     try {
       const result = await api<{ api_key?: string }>(
@@ -68,6 +83,8 @@ export function SettingsPage() {
       setNotice('Настройки приложения сохранены.')
     } catch (e) {
       setError((e as Error).message)
+    } finally {
+      busy.current=false;setPending(false)
     }
   }
   function changeField(action: string, name: string, value: Field, newName = name) {
@@ -116,11 +133,14 @@ export function SettingsPage() {
     setConnection(current => ({ ...current, password: '' }))
     setError('')
     setSourceLoading(true)
+    setSource({table_name:'demo.requests',key_field:'id',allowed_fields:[],mapping:{}});setMapping('')
+    setTestResult('');setConnectionDirty(false)
     try {
       const result = await api<Source | null>('/admin/sources/' + id)
       if (requestNumber !== sourceRequest.current) return
       if (result) {
         setSource(result)
+        if (result.connection) setConnection({...result.connection,password:''})
         setMapping(
           Object.entries(result.mapping)
             .map(([a, b]) => a + '=' + b)
@@ -133,13 +153,10 @@ export function SettingsPage() {
     } catch (e) {
       if (requestNumber === sourceRequest.current) setError((e as Error).message)
     } finally {
-      if (requestNumber === sourceRequest.current) setSourceLoading(false)
+      if (requestNumber === sourceRequest.current) {setSourceLoading(false);setSourceReady(true)}
     }
   }
-  async function saveSource(e: FormEvent) {
-    e.preventDefault()
-    setError('')
-    try {
+  function sourcePayload() {
       const pairs = mapping
         .split('\n')
         .filter(Boolean)
@@ -148,17 +165,37 @@ export function SettingsPage() {
         throw new Error('Для каждого поля проверки выберите столбец БД')
       if (!pairs.length || new Set(pairs.map(pair => pair[0])).size !== pairs.length)
         throw new Error('Выберите хотя бы одно поле; каждому полю нужен один столбец БД')
-      await api('/admin/sources/' + sourceApp, 'PUT', {
-        ...source,
+      return {
+        table_name:source.table_name,key_field:source.key_field,allowed_fields:source.allowed_fields,
         mapping: Object.fromEntries(pairs),
-        url: url || `postgresql+asyncpg://${encodeURIComponent(connection.user)}:${encodeURIComponent(connection.password)}@${connection.host}:${connection.port}/${encodeURIComponent(connection.database)}`,
-      })
+        url: url || (source.credentials_saved && !connectionDirty ? '' : `postgresql+asyncpg://${encodeURIComponent(connection.user)}:${encodeURIComponent(connection.password)}@${connection.host}:${connection.port}/${encodeURIComponent(connection.database)}`),
+      }
+  }
+  async function saveSource(e: FormEvent) {
+    e.preventDefault()
+    if (busy.current) return
+    busy.current=true;setPending(true);setError('');setTestResult('')
+    try {
+      await api('/admin/sources/' + sourceApp, 'PUT', sourcePayload())
       setUrl('')
       setConnection({ ...connection, password: '' })
+      setSource({...source,credentials_saved:true});setConnectionDirty(false)
       setNotice('Источник сохранён. Пароль не отображается повторно.')
     } catch (e) {
       setError((e as Error).message)
+    } finally {
+      busy.current=false;setPending(false)
     }
+  }
+  async function testSource() {
+    if (busy.current) return
+    if (!testKey.trim()) {setError('Укажите ключ тестовой записи, чтобы проверить чтение и сопоставление.');return}
+    busy.current=true;setPending(true);setError('');setTestResult('')
+    try {
+      const result=await api<{message:string;fields:string[]}>('/admin/sources/'+sourceApp+'/test','POST',{...sourcePayload(),record_key:testKey})
+      setTestResult(result.message+' Поля: '+result.fields.map(fieldLabel).join(', '))
+      setTestSignature(sourceSignature)
+    } catch(e) {setError((e as Error).message)} finally {busy.current=false;setPending(false)}
   }
   const visibleApps = apps.filter((app) =>
     [app.id, app.name].some((value) =>
@@ -183,7 +220,7 @@ export function SettingsPage() {
           + Приложение
         </button>
       </div>
-      {error && (
+      {error && tab !== 'sources' && (
         <div className="error" role="alert">
           {error}
         </div>
@@ -208,7 +245,7 @@ export function SettingsPage() {
         active={tab}
         onChange={(value) => {
           setTab(value)
-          if (value === 'sources') void loadSource(sourceApp)
+          if (value === 'sources' && !sourceReady) void loadSource(sourceApp)
         }}
         items={[
           { id: 'applications', label: 'Приложения' },
@@ -260,7 +297,7 @@ export function SettingsPage() {
         )}
         {tab === 'applications' && draft && (
           <form className="card" onSubmit={save}>
-            <h2>Каталог приложения</h2>
+            <h2>Каталог приложения</h2><p className="muted">Тип действия определяет доступные поля. API — значение передаёт приложение; БД — читается по ключу из источника PostgreSQL.</p>
             <div className="form-grid">
               <label>
                 Идентификатор
@@ -293,7 +330,7 @@ export function SettingsPage() {
             </div>
             {Object.entries(draft.catalog).map(([action, config]) => (
               <fieldset key={action}>
-                <legend>Тип события: {action}</legend>
+                <legend>Тип события: {label(action)}</legend>
                 <div className="table-scroll">
                   <table>
                     <thead>
@@ -350,8 +387,8 @@ export function SettingsPage() {
                                 })
                               }
                             >
-                              <option>API</option>
-                              <option>DB</option>
+                              <option value="API">API · из запроса</option>
+                              <option value="DB">БД · из источника</option>
                             </select>
                           </td>
                           <td>
@@ -414,7 +451,7 @@ export function SettingsPage() {
               </button>
             </div>
             <div className="actions">
-              <button className="primary">Сохранить каталог</button>
+              <button className="primary" disabled={pending}>{pending ? 'Сохраняем…' : 'Сохранить каталог'}</button>
               <button type="button" onClick={() => setDraft(null)}>
                 Закрыть
               </button>
@@ -424,11 +461,13 @@ export function SettingsPage() {
         {tab === 'sources' && (
           <form className="card" onSubmit={saveSource}>
             <h2>Источник PostgreSQL · только чтение</h2>
+            <button type="button" className="quiet" disabled={sourceLoading || pending} onClick={()=>loadSource(sourceApp)}>Загрузить сохранённые настройки</button>
             <p className="muted">
               Один источник на поле. Разрешённые таблицы и серверы задаются при локальном
               подключении. История поступает через API.
             </p>
-            <fieldset disabled={sourceLoading} className="form-grid">
+            {source.credentials_saved && <p className="source-saved">Подключение сохранено. Чтобы оставить его прежним, не меняйте параметры доступа. Пароль не возвращается в интерфейс.</p>}
+            <fieldset disabled={sourceLoading || pending} className="form-grid">
               <label>
                 Приложение
                 <select
@@ -443,7 +482,7 @@ export function SettingsPage() {
                   ))}
                 </select>
               </label>
-              {Object.entries({ host: 'Сервер БД', port: 'Порт БД', database: 'База данных', user: 'Пользователь только для чтения', password: 'Пароль подключения' }).map(([key, text]) => <label key={key}>{text}<input required={!url} disabled={Boolean(url)} type={key === 'password' ? 'password' : key === 'port' ? 'number' : 'text'} autoComplete={key === 'password' ? 'new-password' : 'off'} min={key === 'port' ? 1 : undefined} max={key === 'port' ? 65535 : undefined} value={connection[key as keyof typeof connection]} onChange={e => setConnection({ ...connection, [key]: e.target.value })}/></label>)}
+              {Object.entries({ host: 'Сервер БД', port: 'Порт БД', database: 'База данных', user: 'Пользователь только для чтения', password: 'Пароль подключения' }).map(([key, text]) => <label key={key}>{text}<input required={!url && (key !== 'password' || !source.credentials_saved || connectionDirty)} disabled={Boolean(url)} type={key === 'password' ? 'password' : key === 'port' ? 'number' : 'text'} autoComplete={key === 'password' ? 'new-password' : 'off'} min={key === 'port' ? 1 : undefined} max={key === 'port' ? 65535 : undefined} value={connection[key as keyof typeof connection]} onChange={e => {setConnection({ ...connection, [key]: e.target.value });setConnectionDirty(true);setTestResult('')}}/></label>)}
               <details><summary>Подключение готовым URL</summary><label>URL подключения<input type="password" autoComplete="new-password" placeholder="postgresql+asyncpg://…" value={url} onChange={e => setUrl(e.target.value)}/></label></details>
               <label>
                 Таблица
@@ -482,7 +521,9 @@ export function SettingsPage() {
               </fieldset>
             </fieldset>
             {sourceLoading && <p role="status">Загружаем настройки источника…</p>}
-            <button className="primary" disabled={sourceLoading}>
+            <div className="connection-test"><label>Ключ тестовой записи<input value={testKey} onChange={e=>{setTestKey(e.target.value);setTestResult('')}} placeholder="ID существующей записи"/></label><button type="button" disabled={sourceLoading || pending} onClick={testSource}>{pending ? 'Обрабатываем…' : 'Проверить подключение и чтение'}</button></div>
+            <div ref={sourceFeedback}>{error && <div className="error" role="alert">{error}</div>}{testResult && testSignature === sourceSignature && <div className="notice" role="status">{testResult}</div>}</div>
+            <button className="primary" disabled={sourceLoading || pending}>
               Сохранить источник
             </button>
           </form>
@@ -503,6 +544,8 @@ export function SettingsPage() {
               <button
                 disabled={resetPhrase !== 'Вернуть учебное демо'}
                 onClick={async () => {
+                  if (busy.current) return
+                  busy.current=true;setPending(true)
                   setError('')
                   try {
                     const result = await api<{ message: string }>('/demo/reset', 'POST', {
@@ -512,6 +555,8 @@ export function SettingsPage() {
                     setResetPhrase('')
                   } catch (e) {
                     setError((e as Error).message)
+                  } finally {
+                    busy.current=false;setPending(false)
                   }
                 }}
               >

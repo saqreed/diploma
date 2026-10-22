@@ -1,9 +1,10 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Navigate } from 'react-router'
-import { api, label, type Decision, type EventView } from '../api'
+import { api, label, type Application, type Decision, type EventView, type JournalItem } from '../api'
 import { DecisionCard } from '../components/DecisionCard'
 import { SidePanel } from '../components/SidePanel'
 import { useSession } from '../session'
+import { Values } from '../components/Values'
 
 const pageSize = 50
 const date = (value: string) => new Date(value).toLocaleString('ru-RU')
@@ -34,14 +35,7 @@ function Events({ rows }: { rows: EventView[] }) {
               <td>
                 <details>
                   <summary>Показать значения</summary>
-                  <dl className="value-list">
-                    {Object.entries(row.fields).map(([key, value]) => (
-                      <div key={key}>
-                        <dt>{key}</dt>
-                        <dd>{String(value)}</dd>
-                      </div>
-                    ))}
-                  </dl>
+                  <Values values={row.fields}/>
                 </details>
               </td>
             </tr>
@@ -53,7 +47,7 @@ function Events({ rows }: { rows: EventView[] }) {
 }
 export function JournalPage() {
   const { account } = useSession()
-  const [rows, setRows] = useState<Decision[]>([])
+  const [rows, setRows] = useState<JournalItem[]>([])
   const [offset, setOffset] = useState(0)
   const [selected, setSelected] = useState<Decision | null>(null)
   const [filters, setFilters] = useState({
@@ -69,47 +63,78 @@ export function JournalPage() {
   const [comment, setComment] = useState('')
   const [pending, setPending] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [apps, setApps] = useState<Application[]>([])
+  const [applied, setApplied] = useState(filters)
+  const [returnFocus, setReturnFocus] = useState<HTMLElement | null>(null)
+  const revision = useRef(0)
+  const busy = useRef(false)
+  const selectedId=selected?.id
+  const [refreshError,setRefreshError]=useState('')
   useEffect(() => {
     if (account && ['admin', 'specialist'].includes(account.role)) {
-      api<Decision[]>('/journal?limit=' + pageSize + (account.role === 'specialist' ? '&state=PENDING_REVIEW' : ''))
-        .then(setRows)
-        .catch((e) => setError(e.message))
-        .finally(() => setLoading(false))
+      const controller = new AbortController()
+      const current = ++revision.current
+      Promise.all([api<JournalItem[]>('/journal?brief=true&limit=' + pageSize + (account.role === 'specialist' ? '&state=PENDING_REVIEW' : ''), 'GET', undefined, controller.signal), api<Application[]>('/admin/applications', 'GET', undefined, controller.signal)])
+        .then(([decisions, applications]) => {if (current === revision.current) {setRows(decisions); setApps(applications)}})
+        .catch((e) => {if (!controller.signal.aborted && current === revision.current) setError(e.message)})
+        .finally(() => {if (!controller.signal.aborted && current === revision.current) setLoading(false)})
+      return () => {controller.abort()}
     }
   }, [account])
+  useEffect(() => {
+    if (!selectedId) return
+    const controller=new AbortController()
+    let timer:ReturnType<typeof setTimeout>
+    const refresh=async()=>{
+      try {
+        const fresh=await api<Decision>('/decisions/'+selectedId,'GET',undefined,controller.signal)
+        if (!controller.signal.aborted) {
+          setSelected(current=> current?.id === selectedId ? {...fresh,...((current.related_events?.length ?? 0) > (fresh.related_events?.length ?? 0) ? {related_events:current.related_events!} : {})} : current)
+          setRefreshError('')
+        }
+      } catch(e) {if(!controller.signal.aborted) setRefreshError((e as Error).message)}
+      finally {if(!controller.signal.aborted) timer=setTimeout(refresh,2000)}
+    }
+    timer=setTimeout(refresh,2000)
+    return ()=>{controller.abort();clearTimeout(timer)}
+  },[selectedId])
   if (!account) return <Navigate to="/login" replace />
   if (!['admin', 'specialist'].includes(account.role))
     return <p>Журнал доступен администратору и специалисту.</p>
-  async function load(nextOffset = offset) {
+  async function load(nextOffset = offset, nextFilters = applied) {
+    const current = ++revision.current
     setError('')
     setLoading(true)
-    const query = new URLSearchParams({ limit: String(pageSize), offset: String(nextOffset) })
-    Object.entries(filters).forEach(([key, value]) => {
+    const query = new URLSearchParams({ brief:'true', limit: String(pageSize), offset: String(nextOffset) })
+    Object.entries(nextFilters).forEach(([key, value]) => {
       if (value)
         query.set(key, key === 'start' || key === 'end' ? new Date(value).toISOString() : value)
     })
     try {
-      setRows(await api<Decision[]>('/journal?' + query))
-      setOffset(nextOffset)
+      const result = await api<JournalItem[]>('/journal?' + query)
+      if (current === revision.current) {setRows(result);setOffset(nextOffset);setApplied(nextFilters)}
     } catch (e) {
-      setError((e as Error).message)
+      if (current === revision.current) {setError((e as Error).message);setRows([])}
     } finally {
-      setLoading(false)
+      if (current === revision.current) setLoading(false)
     }
   }
   async function filter(e: FormEvent) {
     e.preventDefault()
-    await load(0)
+    if (filters.start && filters.end && filters.start > filters.end) {setError('Дата начала должна быть раньше даты окончания.');return}
+    await load(0, filters)
   }
   async function select(id: string) {
+    if (!selected && document.activeElement instanceof HTMLElement) setReturnFocus(document.activeElement)
     setComment('')
-    setLoading(true)
+    setDetailLoading(true)
     try {
       setSelected(await api<Decision>('/decisions/' + id))
     } catch (e) {
       setError((e as Error).message)
     } finally {
-      setLoading(false)
+      setDetailLoading(false)
     }
   }
   async function moreEvents() {
@@ -130,7 +155,8 @@ export function JournalPage() {
     }
   }
   async function review(approve: boolean) {
-    if (!selected) return
+    if (!selected || busy.current) return
+    busy.current = true
     setPending(true)
     setError('')
     try {
@@ -140,6 +166,7 @@ export function JournalPage() {
     } catch (e) {
       setError((e as Error).message)
     } finally {
+      busy.current = false
       setPending(false)
     }
   }
@@ -147,7 +174,7 @@ export function JournalPage() {
     <>
       <div className="page-heading">
         <div>
-          <h1>Журнал проверок</h1>
+          <h1>{account.role === 'specialist' && applied.state === 'PENDING_REVIEW' ? 'Очередь рассмотрения' : 'Журнал проверок'}</h1>
           <p className="muted">Причины, проверенные значения и история переходов.</p>
         </div>
         <button onClick={() => load()}>Обновить</button>
@@ -158,20 +185,12 @@ export function JournalPage() {
         </div>
       )}
       {loading && <p role="status">Загружаем проверки…</p>}
+      {detailLoading && <p role="status">Открываем проверку…</p>}
+      <div className="filter-tabs" role="group" aria-label="Представление журнала"><button aria-pressed={applied.state === 'PENDING_REVIEW'} disabled={loading} onClick={() => {const next={...filters,state:'PENDING_REVIEW'};setFilters(next);void load(0,next)}}>Ожидают специалиста</button><button aria-pressed={!applied.state} disabled={loading} onClick={() => {const next={...filters,state:''};setFilters(next);void load(0,next)}}>Все проверки</button></div>
       <form className="card journal-filters" onSubmit={filter}>
         <div className="toolbar">
-          {Object.entries({ application_id: 'Приложение', action: 'Действие' }).map(
-            ([key, text]) => (
-              <label key={key}>
-                {text}
-                <input
-                  type="text"
-                  value={filters[key as keyof typeof filters]}
-                  onChange={(e) => setFilters({ ...filters, [key]: e.target.value })}
-                />
-              </label>
-            ),
-          )}
+          <label>Приложение<select aria-label="Приложение" value={filters.application_id} onChange={e => setFilters({...filters,application_id:e.target.value,action:''})}><option value="">Все приложения</option>{apps.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label>
+          <label>Действие<select aria-label="Действие" value={filters.action} onChange={e => setFilters({...filters,action:e.target.value})}><option value="">Все действия</option>{Array.from(new Set(apps.filter(a => !filters.application_id || a.id === filters.application_id).flatMap(a => Object.keys(a.catalog)))).map(action => <option key={action} value={action}>{label(action)}</option>)}</select></label>
           <label>
             Состояние
             <select
@@ -218,6 +237,7 @@ export function JournalPage() {
           </div>
         </details>
       </form>
+      {JSON.stringify(applied) !== JSON.stringify(filters) && <p className="filter-hint" role="status">Фильтры изменены. Нажмите «Применить фильтры», чтобы обновить результаты.</p>}
       <section className="card table-card">
         <div className="table-scroll">
           <table>
@@ -233,11 +253,11 @@ export function JournalPage() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
+              {!loading && rows.map((r) => (
                 <tr key={r.id}>
                   <td className="nowrap">{date(r.created_at)}</td>
                   <td>
-                    <strong>{r.application_id}</strong>
+                    <strong>{r.operation_title ?? apps.find(a=>a.id === r.application_id)?.name ?? r.application_id}</strong>
                     <small className="id-ref" title={r.operation_id}>
                       {r.operation_id}
                     </small>
@@ -251,13 +271,13 @@ export function JournalPage() {
                   </td>
                   <td>
                     {r.reasons
-                      .filter((reason) => reason.matched)
-                      .map((reason) => reason.name)
-                      .join(', ') || 'Нет'}
+                      .filter((reason) => reason.matched || reason.error)
+                      .map((reason) => reason.message ?? reason.name)
+                      .join(', ') || 'Нет ограничений'}
                   </td>
                   <td>{r.executed_at ? 'Сохранено' : 'Не выполнено'}</td>
                   <td>
-                    <button disabled={loading} onClick={() => select(r.id)}>
+                    <button disabled={loading || detailLoading} onClick={() => select(r.id)}>
                       Подробнее
                     </button>
                   </td>
@@ -289,7 +309,8 @@ export function JournalPage() {
         </div>
       </section>
       {selected && (
-        <SidePanel title="Проверка операции" onClose={() => setSelected(null)}>
+        <SidePanel returnFocus={returnFocus} title="Проверка операции" onClose={() => setSelected(null)}>
+          {refreshError && <div className="error" role="alert">Не удалось обновить состояние: {refreshError}</div>}
           {error && (
             <div className="error" role="alert">
               {error}

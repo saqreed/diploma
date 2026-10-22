@@ -9,11 +9,18 @@ from dotenv import dotenv_values
 
 
 def main():
+    project = os.environ.get('COMPOSE_PROJECT_NAME', 'diploma-review-20261008')
+    ci = project.startswith('diploma-ci-')
+    target = os.environ.get('DIPLOMA_TEST_URL', 'http://127.0.0.1:8000' if ci else 'http://127.0.0.1:28000')
+    assert target == 'http://127.0.0.1:28000' and project == 'diploma-review-20261008' or ci and target == 'http://127.0.0.1:8000', 'Restart test requires isolated QA/CI'
+    compose = ['docker', 'compose', '-p', project, '-f', '../docker-compose.yml']
+    if not ci:
+        compose += ['-f', '../docker-compose.review.yml']
     env = dotenv_values('../.env')
     prefix = 'qa-restart-' + str(uuid4())[:8]
-    with httpx.Client(trust_env=False, base_url=os.environ.get('DIPLOMA_TEST_URL', 'http://127.0.0.1:8000'), timeout=20,
+    with httpx.Client(trust_env=False, base_url=target, timeout=20,
                       headers={'X-Requested-With': 'antifraud-ui'}) as admin, \
-         httpx.Client(trust_env=False, base_url=os.environ.get('DIPLOMA_TEST_URL', 'http://127.0.0.1:8000'), timeout=20,
+         httpx.Client(trust_env=False, base_url=target, timeout=20,
                       headers={'X-Requested-With': 'antifraud-ui'}) as employee:
         def call(client, path, body=None, method='POST'):
             response = client.request(method, '/api' + path, json=body)
@@ -29,7 +36,7 @@ def main():
         result = call(employee, '/demo/execute', execution)
         before = call(employee, '/decisions/' + d['id'], method='GET')
         assert len(before['events']) == 1
-        restarted = subprocess.run(['docker', 'compose', 'restart', 'postgres', 'backend'], capture_output=True, text=True)
+        restarted = subprocess.run(compose + ['restart', 'postgres', 'backend'], capture_output=True, text=True)
         assert restarted.returncode == 0, 'Compose restart failed'
         until = monotonic() + 60
         while True:

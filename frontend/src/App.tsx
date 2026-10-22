@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router'
 import { api, ApiError, label, type Account } from './api'
 import { SessionContext } from './session'
+import { Icon } from './components/Icon'
 
 export function App() {
   const [account, setAccount] = useState<Account | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [leaving, setLeaving] = useState(false)
   const navigate = useNavigate()
   const location = useLocation()
   useEffect(() => {
@@ -18,12 +20,16 @@ export function App() {
       .finally(() => setLoading(false))
   }, [])
   async function logout() {
+    if (leaving) return
+    setLeaving(true)
     try {
       await api('/auth/logout', 'POST')
       setAccount(null)
       navigate('/login')
     } catch (e) {
       setError((e as Error).message)
+    } finally {
+      setLeaving(false)
     }
   }
   if (loading) return <div className="loading">Загрузка сеанса…</div>
@@ -45,25 +51,25 @@ export function App() {
         {account && (
           <aside className="sidebar">
             <NavLink to="/" className="brand">
-              Антифрод<small>Проверка действий</small>
+              <Icon name="shield"/><span>Антифрод<small>Настраиваемые проверки</small></span>
             </NavLink>
             <nav aria-label="Основная навигация">
               {account?.role === 'admin' && (
                 <>
-                  <NavLink to="/admin">Правила проверки</NavLink>
-                  <NavLink to="/settings">Приложения и источники</NavLink>
+                  <NavLink to="/admin"><Icon name="rules"/>Правила проверки</NavLink>
+                  <NavLink to="/settings"><Icon name="apps"/>Приложения и источники</NavLink>
                 </>
               )}
               {account && ['admin', 'specialist'].includes(account.role) && (
-                <NavLink to="/journal">Журнал решений</NavLink>
+                <NavLink to="/journal"><Icon name="journal"/>Журнал решений</NavLink>
               )}
               {account && ['employee', 'manager', 'accountant'].includes(account.role) && (
-                <NavLink to="/demo">Возмещение расходов</NavLink>
+                <NavLink to="/demo"><Icon name="expenses"/>Возмещение расходов</NavLink>
               )}
             </nav>
             <div className="sidebar-bottom">
-              <strong>Демонстрационный стенд</strong>
-              <small>Без настоящих платежей</small>
+              <strong>Учебный стенд</strong>
+              <small>Выплаты условные</small>
             </div>
           </aside>
         )}
@@ -71,18 +77,18 @@ export function App() {
           <header className="topbar">
             {account ? (
               <>
-                <span>{section}</span>
+                <span className="breadcrumb">Рабочее пространство <Icon name="arrow"/><strong>{section}</strong></span>
                 <div className="account">
-                  <span>{account.username}</span>
+                  <Icon name="user"/><span>{account.username}</span>
                   <strong>{label(account.role)}</strong>
-                  <button className="quiet" onClick={logout}>
-                    Выйти
+                  <button className="quiet" disabled={leaving} onClick={logout}>
+                    {leaving ? 'Выходим…' : 'Выйти'}
                   </button>
                 </div>
               </>
             ) : (
               <NavLink to="/login" className="brand">
-                Антифрод
+                <Icon name="shield"/>Антифрод
               </NavLink>
             )}
           </header>

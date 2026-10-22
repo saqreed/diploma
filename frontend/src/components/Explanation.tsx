@@ -1,17 +1,26 @@
 import {kinds} from '../rule-presets'
-import {fieldLabel} from '../api'
-const operations: Record<string, string> = {eq: 'равно', ne: 'не равно', gt: 'больше', ge: 'не меньше', lt: 'меньше', le: 'не больше', in: 'входит в список'}
-function valueText(value: unknown): string {return Array.isArray(value) ? value.map(valueText).join(', ') : typeof value === 'boolean' ? value ? 'да' : 'нет' : value === null || value === undefined ? '—' : String(value)}
-export function Explanation({trace}: {trace: unknown}) {
+import {fieldLabel, label, valueText, type Expression} from '../api'
+import {comparisons, periodText, ruleText} from '../rule-text'
+
+export function Explanation({trace, node}: {trace: unknown; node?: Expression | undefined}) {
   if (!trace || typeof trace !== 'object') return <p className="muted">Проверка не выполнена.</p>
   const t = trace as Record<string, unknown>
   if (t.excluded) return <p>Ограничение пропущено: сработало исключение этого правила.</p>
-  const children = Array.isArray(t.children) ? t.children : []
+  const children = Array.isArray(t.children) ? t.children : t.child ? [t.child] : []
   const history = Array.isArray(t.event_ids) ? t.event_ids : []
-  return <div className="explanation"><strong>{kinds[String(t.kind)] ?? 'Проверка'} · {t.matched ? 'условие выполнено' : 'условие не выполнено'}</strong>{children.length > 0 ? children.map((child, i) => <Explanation trace={child} key={i} />) : <>
-    <p>{t.field ? 'Поле «' + fieldLabel(String(t.field)) + '»: ' : 'Полученное значение: '}{valueText(t.actual)}{t.op ? ' ' + operations[String(t.op)] + ' ' + valueText(t.expected ?? t.threshold) : ''}</p>
-    {t.history_state && <p>История: {({EMPTY: 'событий сущности ещё нет', NEW: 'значение новое для сущности', KNOWN: 'значение уже встречалось'} as Record<string, string>)[String(t.history_state)]}</p>}
-    {t.missing_required_event && <p>Нужное предыдущее событие с актуальными значениями не найдено.</p>}
-    {t.period_seconds !== undefined && <p className="muted">Период: {t.period_seconds ? valueText(t.period_seconds) + ' с' : 'вся история'}. Группировка: {valueText(t.group_by)}. Учитываемые статусы: {valueText(t.statuses)}. Событий: {history.length}.{t.include_current ? ' Текущая операция учитывается один раз, если проходит фильтр и ещё отсутствует в истории.' : ''}</p>}
-  </>}</div>
+  const kind = String(t.kind)
+  const numeric = ['count','aggregate','sequence','previous','duplicate'].includes(kind) || node?.value_type === 'number'
+  const format = (v: unknown) => numeric && v !== null && v !== undefined && Number.isFinite(Number(v)) ? Number(v).toLocaleString('ru-RU') : valueText(v)
+  const actual = format(t.actual)
+  const subject = kind === 'count' ? 'Количество событий' : kind === 'aggregate' ? node?.aggregate === 'unique' ? 'Разных значений' : 'Накопленная сумма' : kind === 'sequence' ? 'Найдено шагов' : kind === 'previous' ? 'Подходящих предыдущих событий' : t.field || node?.field ? fieldLabel(String(t.field ?? node?.field)) : 'Результат'
+  return <div className={'explanation ' + (t.matched ? 'matched' : '')}>
+    <div className="explanation-heading"><strong>{kinds[kind] ?? 'Проверка'}</strong><span>{t.matched ? 'Условие выполнено' : 'Условие не выполнено'}</span></div>
+    {children.length ? children.map((child,i) => <Explanation trace={child} node={node?.children?.[i] ?? node?.child} key={i}/>) : <>
+      {node && <p className="condition-sentence">{ruleText(node)}</p>}
+      <p className="measurement"><span>{subject}</span><strong>{actual}</strong>{t.op ? <span>{comparisons[String(t.op)]} {format(t.expected ?? t.threshold)}</span> : null}</p>
+      {t.history_state ? <p>{({EMPTY:'Событий этой сущности ещё нет.',NEW:'Значение новое для этой сущности.',KNOWN:'Значение уже встречалось у этой сущности.'} as Record<string,string>)[String(t.history_state)]}</p> : null}
+      {t.missing_required_event ? <p>Нужное предыдущее событие с актуальными значениями не найдено.</p> : null}
+      {t.statuses ? <div className="history-context"><span>Период: {periodText(Number(t.period_seconds))}</span><span>Группа: {(Array.isArray(t.group_by) ? t.group_by.map(v=>fieldLabel(String(v))).join(', ') : '') || 'все события'}</span><span>Статусы: {Array.isArray(t.statuses) ? t.statuses.map(v=>label(String(v))).join(', ') : valueText(t.statuses)}</span><span>В истории: {String(t.history_count ?? history.length)}</span>{t.include_current ? <span>Текущая операция учитывается один раз, если проходит фильтр.</span> : null}</div> : null}
+    </>}
+  </div>
 }

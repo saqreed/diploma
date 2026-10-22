@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { Navigate } from 'react-router'
 import { api, label, type Application, type Rule, type RuleTemplate, type Watchlist } from '../api'
 import { RuleBuilder } from '../components/RuleBuilder'
 import { TabBar } from '../components/TabBar'
 import { baseNode, kinds } from '../rule-presets'
 import { useSession } from '../session'
+import { mechanismHelp, ruleText } from '../rule-text'
 export function RulesPage() {
   const { account } = useSession()
   const [apps, setApps] = useState<Application[]>([])
@@ -25,6 +26,9 @@ export function RulesPage() {
   const [tab, setTab] = useState('rules')
   const [search, setSearch] = useState('')
   const [ruleState, setRuleState] = useState('enabled')
+  const [actionFilter, setActionFilter] = useState('')
+  const busy = useRef(false)
+  const appDrafts = useRef(new Map<string,{draft:Rule|null;editingTemplate:boolean;listId:string|null;listName:string;listValues:string;listType:string}>())
   const load = useCallback(async () => {
     const [a, r, l, t] = await Promise.all([
       api<Application[]>('/admin/applications'),
@@ -62,6 +66,10 @@ export function RulesPage() {
   if (!account) return <Navigate to="/login" replace />
   if (account.role !== 'admin') return <p>Настройка правил доступна администратору.</p>
   const app = apps.find((a) => a.id === appId)
+  function closeDraft() {
+    appDrafts.current.delete(appId)
+    setDraft(null)
+  }
   function fresh(kind = 'field') {
     setTab('rules')
     setEditingTemplate(false)
@@ -102,6 +110,8 @@ export function RulesPage() {
     })
   }
   async function run(task: () => Promise<void>) {
+    if (busy.current) return
+    busy.current = true
     setError('')
     setPending(true)
     try {
@@ -109,6 +119,7 @@ export function RulesPage() {
     } catch (e) {
       setError((e as Error).message)
     } finally {
+      busy.current = false
       setPending(false)
     }
   }
@@ -123,7 +134,7 @@ export function RulesPage() {
         id ? 'PUT' : 'POST',
         payload,
       )
-      setDraft(null)
+      closeDraft()
       setTab(editingTemplate ? 'templates' : 'rules')
       setRuleState('all')
       setSearch('')
@@ -149,43 +160,28 @@ export function RulesPage() {
   const visibleRules = rules
     .filter(
       (rule) =>
-        (ruleState === 'all' || rule.enabled === (ruleState === 'enabled')) &&
-        [rule.name, label(rule.action), kinds[rule.expression.kind]].some((value) =>
+        (ruleState === 'all' || rule.enabled === (ruleState === 'enabled')) && (!actionFilter || rule.action === actionFilter) &&
+        [rule.name, label(rule.action), ruleText(rule.expression)].some((value) =>
           value?.toLocaleLowerCase('ru').includes(search.toLocaleLowerCase('ru')),
         ),
     )
     .sort((a, b) => Number(b.enabled) - Number(a.enabled) || a.name.localeCompare(b.name, 'ru'))
-  return (
-    <>
-      <div className="page-heading">
-        <div>
-          <h1>Правила антифрода</h1>
-          <p className="muted">Настройте условия и реакцию без написания кода.</p>
-        </div>
-        <button className="primary" disabled={!app} onClick={() => fresh()}>
-          + Новое правило
-        </button>
-      </div>
-      {loading && <p role="status">Загружаем правила…</p>}
-      {error && (
-        <div className="error" role="alert">
-          {error}
-        </div>
-      )}
-      {notice && (
-        <div className="notice" role="status">
-          {notice}
-        </div>
-      )}
-      <div className="toolbar">
-        <label>
+  const applicationSelect = (
+<label>
           Приложение
           <select
             aria-label="Приложение"
-            value={appId}
+            value={appId} disabled={pending}
             onChange={(e) => {
-              setAppId(e.target.value)
-              setDraft(null)
+              const nextId=e.target.value
+              if(nextId === appId) return
+              appDrafts.current.set(appId,{draft,editingTemplate,listId,listName,listValues,listType})
+              const cached=appDrafts.current.get(nextId)
+              setAppId(nextId)
+              setLoading(true)
+              setRules([]); setLists([]); setTemplates([]); setActionFilter('')
+              setDraft(cached?.draft ?? null);setEditingTemplate(cached?.editingTemplate ?? false)
+              setListId(cached?.listId ?? null);setListName(cached?.listName ?? '');setListValues(cached?.listValues ?? '');setListType(cached?.listType ?? 'string')
               setSearch('')
               setRuleState('enabled')
             }}
@@ -197,8 +193,30 @@ export function RulesPage() {
             ))}
           </select>
         </label>
-        <p className="muted">Приоритет: запрет → ручная проверка → подтверждение → разрешение</p>
+  )
+  return (
+    <>
+      <div className="page-heading">
+        <div>
+          <h1>{draft && tab === 'rules' ? editingTemplate ? 'Изменение шаблона' : draft.id ? 'Изменение правила' : 'Новое правило' : 'Правила антифрода'}</h1>
+          <p className="muted">Условия, история и реакция в одном правиле.</p>
+        </div>
+        {!(draft && tab === 'rules') && <button className="primary" disabled={!app || pending} onClick={() => fresh()}>
+          + Новое правило</button>}
+        {draft && tab === 'rules' && <button type="button" onClick={closeDraft}>Закрыть</button>}
       </div>
+      {loading && <p role="status">Загружаем правила…</p>}
+      {error && !(draft && tab === 'rules') && (
+        <div className="error" role="alert">
+          {error}
+        </div>
+      )}
+      {notice && (
+        <div className="notice" role="status">
+          {notice}
+        </div>
+      )}
+      {tab !== 'rules' && <div className="toolbar">{applicationSelect}</div>}
       <TabBar
         id="rules"
         label="Разделы правил"
@@ -217,7 +235,7 @@ export function RulesPage() {
               <h2>Активные настройки</h2>
               <span className="muted">{rules.filter((r) => r.enabled).length} включено</span>
             </div>
-            <div className="table-tools">
+            <div className="table-tools">{applicationSelect}
               <label>
                 Поиск правил
                 <input
@@ -226,6 +244,10 @@ export function RulesPage() {
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Название, действие или механизм"
                 />
+              </label>
+              <label className="filter-select">
+                Действие правила
+                <select value={actionFilter} onChange={e => setActionFilter(e.target.value)}><option value="">Все действия</option>{Object.keys(app?.catalog ?? {}).map(action => <option key={action} value={action}>{label(action)}</option>)}</select>
               </label>
               <label className="filter-select">
                 Состояние правил
@@ -255,12 +277,11 @@ export function RulesPage() {
                     <tr key={r.id}>
                       <td>
                         <strong>{r.name}</strong>
-                        <small>
-                          {kinds[r.expression.kind]} · версия {r.version}
-                        </small>
+                        <small className="rule-description">{ruleText(r.expression)}</small>
+                        <small>{app?.name} · версия {r.version}</small>
                       </td>
                       <td>{label(r.action)}</td>
-                      <td>{label(r.reaction)}</td>
+                      <td><span className={'badge ' + r.reaction}>{label(r.reaction)}</span></td>
                       <td>
                         <span className={'badge ' + (r.enabled ? 'enabled' : 'disabled')}>
                           {r.enabled ? 'Включено' : 'Отключено'}
@@ -280,7 +301,7 @@ export function RulesPage() {
                   ))}
                 </tbody>
               </table>
-              {!visibleRules.length && (
+              {!loading && !visibleRules.length && (
                 <p className="empty">
                   {rules.length
                     ? 'По выбранным условиям правил нет. Измените поиск или состояние.'
@@ -301,7 +322,7 @@ export function RulesPage() {
                 .filter(([k]) => !['all', 'any', 'not'].includes(k))
                 .map(([k, name]) => (
                   <button key={k} disabled={!app} onClick={() => fresh(k)}>
-                    {name}
+                    <strong>{name}</strong><small>{mechanismHelp[k]}</small>
                   </button>
                 ))}
             </div>
@@ -333,20 +354,11 @@ export function RulesPage() {
           </section>
         )}
         {draft && app && tab === 'rules' && (
-          <form className="card" onSubmit={save}>
-            <div className="section-heading">
-              <h2>
-                {editingTemplate
-                  ? 'Изменение шаблона'
-                  : draft.id
-                    ? 'Изменение правила'
-                    : 'Новое правило'}
-              </h2>
-              <button type="button" onClick={() => setDraft(null)}>
-                Закрыть
-              </button>
-            </div>
-            <div className="form-grid">
+          <form className="rule-editor" onSubmit={save} aria-busy={pending}>
+            <section className="card editor-main">
+            {error && <div className="error" role="alert">{error}</div>}
+            <h3>1. Действие и реакция</h3>
+            <div className="form-grid">{applicationSelect}
               <label>
                 Название
                 <input
@@ -399,7 +411,7 @@ export function RulesPage() {
                 Правило включено
               </label>
             </div>
-            <h3>Условия срабатывания</h3>
+            <h3>2. Условия срабатывания</h3>
             <RuleBuilder
               node={draft.expression}
               app={app}
@@ -407,6 +419,7 @@ export function RulesPage() {
               lists={lists}
               onChange={(expression) => setDraft({ ...draft, expression })}
             />
+            <h3>3. Исключение</h3>
             <label className="check">
               <input
                 type="checkbox"
@@ -429,7 +442,9 @@ export function RulesPage() {
                 onChange={(exception) => setDraft({ ...draft, exception })}
               />
             )}
-            <div className="actions">
+            </section>
+            <aside className="card editor-summary"><h2>Как сработает правило</h2><p className="rule-sentence">{ruleText(draft.expression)}</p><h3>Следующий этап</h3><span className={'badge ' + draft.reaction}>{label(draft.reaction)}</span><p>{({REVIEW:'Специалист рассмотрит операцию до выполнения.',CONFIRM:'Инициатор отдельно подтвердит проверенные значения.',BLOCK:'Действие не будет выполнено.',LOG:'Срабатывание сохранится без остановки действия.'} as Record<string,string>)[draft.reaction]}</p><hr/><p>{draft.enabled ? '● Правило включено' : '○ Правило отключено'}</p><small>Черновик сохраняется при переключении вкладок. Изменения применятся после сохранения.</small></aside>
+            <div className="actions editor-actions">
               <button className="primary" disabled={pending}>
                 {editingTemplate ? 'Сохранить шаблон' : 'Сохранить правило'}
               </button>
@@ -438,7 +453,7 @@ export function RulesPage() {
                   Сохранить как новый шаблон
                 </button>
               )}
-              <button type="button" onClick={() => setDraft(null)}>
+              <button type="button" onClick={closeDraft}>
                 Отмена
               </button>
             </div>

@@ -180,3 +180,21 @@ def test_whitespace_expense_is_not_a_valid_document():
     from pydantic import ValidationError
     with pytest.raises(ValidationError):
         ExpenseInput(amount='500', recipient=' ', receipt=' ', vendor=' ', purchase_date='2026-10-08', title=' ')
+
+
+def test_sequence_is_ordered_subsequence_and_does_not_append_current_action():
+    node = historical('sequence', event_types=['create', 'approve', 'pay'], sequence=['create', 'approve'])
+    validate_expression(node, FIELDS, CATALOG)
+    assert evaluate(node, CURRENT, [event('create', seconds=3), event('pay', seconds=2), event('approve', seconds=1)], NOW)[0]
+    # The pending action is not an executed history event. Merely checking it
+    # cannot complete a sequence or fabricate a successful fact.
+    assert not evaluate(node, CURRENT, [event('create', seconds=1)], NOW, operation_id='pending-approve')[0]
+
+
+def test_previous_requires_matching_current_data_but_does_not_infer_revocation():
+    node = historical('previous', event_types=['approve'], match_fields=['amount', 'recipient'])
+    validate_expression(node, FIELDS, {**CATALOG, 'reject': {'fields': FIELDS}})
+    assert evaluate(node, CURRENT, [event('approve', amount='99', seconds=2)], NOW)[0]
+    # Existence semantics only: later business-state changes are enforced by
+    # the application, not inferred from an arbitrary event's name.
+    assert not evaluate(node, CURRENT, [event('approve', seconds=2), event('reject', seconds=1)], NOW)[0]

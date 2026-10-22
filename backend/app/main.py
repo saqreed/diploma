@@ -13,6 +13,7 @@ from app.api.antifraud import router as antifraud_router
 from app.decisions import DomainError
 from app.rules import RuleError
 from app.api.demo_actions import router as demo_router
+from app.outbox import delivery_lifespan
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -25,6 +26,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         ),
         version=application_settings.app_version,
         debug=application_settings.debug,
+        lifespan=delivery_lifespan(application_settings),
     )
     application.include_router(health_router)
     application.include_router(demo_router)

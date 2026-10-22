@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     database_max_overflow: int = Field(default=5, ge=0, le=20)
     database_pool_timeout_seconds: float = Field(default=30.0, gt=0, le=120)
     database_pool_recycle_seconds: int = Field(default=1800, ge=60, le=3600)
+    outbox_dispatch_enabled: bool = True
+    outbox_interval_seconds: float = Field(default=2.0, ge=1, le=60)
+    outbox_max_retry_seconds: float = Field(default=30.0, ge=2, le=300)
 
 
 @cache

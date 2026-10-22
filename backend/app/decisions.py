@@ -126,6 +126,22 @@ async def load_history(session, application, rules, values, at):
     return [dict(row) for row in (await session.execute(query)).mappings()]
 
 
+def evaluate_rules(rules, values, history, at, lists, operation_id):
+    reasons, reactions = [], set()
+    for rule in rules:
+        try:
+            excluded, exception_trace = evaluate(rule.exception, values, history, at, lists, operation_id) if rule.exception else (False, None)
+            matched, trace = evaluate(rule.expression, values, history, at, lists, operation_id) if not excluded else (False, {"excluded": True})
+            reasons.append({"rule_id": rule.id, "name": rule.name, "version": rule.version, "reaction": rule.reaction,
+                            "expression": rule.expression, "exception": rule.exception, "exception_trace": exception_trace, "matched": matched, "trace": trace})
+            if matched:
+                reactions.add(rule.reaction)
+        except RuleError as exc:
+            reactions.add("BLOCK")
+            reasons.append({"rule_id": rule.id, "error": "evaluation_error", "message": str(exc)})
+    return reasons, reactions
+
+
 async def make_check(session, request, request_id=None):
     await lock_key(session, "check:" + request.application_id + ":" + request.operation_id)
     application = await session.get(Application, request.application_id)
@@ -161,17 +177,7 @@ async def make_check(session, request, request_id=None):
         reasons.append({"error": "source_or_field_error", "message": failure})
         reactions.add("BLOCK")
     else:
-        for rule in rules:
-            try:
-                excluded, exception_trace = evaluate(rule.exception, values, history, at, lists, request.operation_id) if rule.exception else (False, None)
-                matched, trace = evaluate(rule.expression, values, history, at, lists, request.operation_id) if not excluded else (False, {"excluded": True})
-                reasons.append({"rule_id": rule.id, "name": rule.name, "version": rule.version, "reaction": rule.reaction,
-                                "expression": rule.expression, "exception": rule.exception, "exception_trace": exception_trace, "matched": matched, "trace": trace})
-                if matched:
-                    reactions.add(rule.reaction)
-            except RuleError as exc:
-                reactions.add("BLOCK")
-                reasons.append({"rule_id": rule.id, "error": "evaluation_error", "message": str(exc)})
+        reasons, reactions = evaluate_rules(rules, values, history, at, lists, request.operation_id)
     state = "REJECTED" if "BLOCK" in reactions else "PENDING_REVIEW" if "REVIEW" in reactions else "PENDING_CONFIRMATION" if "CONFIRM" in reactions else "APPROVED"
     decision = Decision(application_id=application.id, operation_id=request.operation_id, action=request.action,
                         initiator=request.initiator, record_key=request.record_key, request=payload, checked_values=values,
@@ -185,6 +191,7 @@ async def make_check(session, request, request_id=None):
 
 
 async def record_event(session, event):
+    await lock_key(session, "history:" + event.application_id)
     await lock_key(session, "event:" + event.application_id + ":" + event.event_id)
     payload = event.model_dump(mode="json")
     existing = await session.scalar(select(Event).where(Event.application_id == event.application_id, Event.event_id == event.event_id))

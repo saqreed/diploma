@@ -33,6 +33,12 @@ def main():
         call(admin, '/admin/sources/' + prefix, settings, 'PUT')
         saved = call(admin, '/admin/sources/' + prefix, method='GET')
         assert 'url' not in saved and saved['credentials_saved']
+        assert saved['connection']['user'] == 'diploma_reader' and 'password' not in saved['connection']
+        tested = call(admin, '/admin/sources/' + prefix + '/test', {**settings, 'url': '', 'record_key': row['id']})
+        assert tested['fields'] == ['amount', 'recipient'] and 'values' not in tested
+        call(employee, '/admin/sources/' + prefix + '/test', {**settings, 'record_key': row['id']}, expected=403)
+        call(admin, '/admin/sources/' + prefix + '/test', {**settings, 'url': '', 'record_key': 'missing'}, expected=422)
+        call(admin, '/admin/sources/' + prefix, {**settings, 'url': ''}, 'PUT')
         call(admin, '/admin/rules', {'application_id': prefix, 'name': 'QA DB сумма', 'action': 'transfer', 'reaction': 'BLOCK', 'expression': {'kind': 'field', 'field': 'amount', 'op': 'gt', 'value': 1000}})
         payload = {'application_id': prefix, 'operation_id': str(uuid4()), 'action': 'transfer', 'initiator': 'actor', 'record_key': row['id'], 'fields': {'amount': 99999, 'recipient': 'Подмена API'}}
         start = perf_counter()
@@ -51,6 +57,8 @@ def main():
         call(admin, '/admin/sources/' + prefix, {**settings, 'mapping': {'amount': 'password'}}, 'PUT', expected=422)
         print('PASS: missing row, SQL/table injection and unapproved field denied')
         writer = {**settings, 'url': 'postgresql+asyncpg://diploma_demo:' + env['DIPLOMA_DEMO_PASSWORD'] + '@postgres:5432/' + env.get('POSTGRES_DB', 'diploma')}
+        call(admin, '/admin/sources/' + prefix + '/test', {**writer, 'record_key': row['id']}, expected=422)
+        assert call(admin, '/admin/sources/' + prefix, method='GET') == saved, 'Connection test changed saved settings'
         call(admin, '/admin/sources/' + prefix, writer, 'PUT')
         unsafe = call(admin, '/checks', {**payload, 'operation_id': str(uuid4())}, headers=key)
         assert unsafe['state'] == 'REJECTED' and unsafe['reasons'][0]['error'] == 'source_or_field_error'

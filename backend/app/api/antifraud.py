@@ -5,15 +5,17 @@ from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response
 from sqlalchemy import case, delete, select, func
+from sqlalchemy.engine import make_url
 
 from app.access import application_access, require, user
 from app.contracts import ApplicationInput, ApplicationConfirmation, ApplicationCancellation, CheckInput, ConfirmInput, CreateWatchlistInput, DemoCheck, EventInput, ExecuteInput, ExpenseInput, LoginInput, OperationInput, ResetInput, RuleInput, TransitionInput, WatchlistInput
 from app.decisions import DomainError, TERMINAL, db_time, expire, lock_key, make_check, record_event, transition, view
-from app.demo import antifraud_call, authorize_action, deliver_outbox, execute, expense_view, fields, registry_fields, validate_demo_catalog
+from app.demo import antifraud_call, authorize_action, deliver_outbox, execute, expense_view, fields, registry_fields, synchronize_history, validate_demo_catalog
 from app.models import Account, Application, Decision, Event, Execution, Expense, LoginSession, Outbox, ResetArchive, Rule, Source, Template, Transition, Watchlist
 from app.rules import RuleError, field_names, validate_catalog, validate_expression
 from app.runtime import antifraud_sessions, demo_sessions
 from app.security import digest, verify_password
+from app.config import get_settings
 from app.sources import cipher, read_source, validate_source
 from app.demo_seed import seed_data
 
@@ -282,8 +284,10 @@ async def source_view(application_id: str, account=Depends(user)):
         row = await session.get(Source, application_id)
         if not row:
             return None
+        connection = make_url(cipher().decrypt(row.encrypted_url.encode()).decode())
         return {"application_id": row.application_id, "table_name": row.table_name, "key_field": row.key_field,
-                "allowed_fields": row.allowed_fields, "mapping": row.mapping, "credentials_saved": True}
+                "allowed_fields": row.allowed_fields, "mapping": row.mapping, "credentials_saved": True,
+                "connection": {"host": connection.host, "port": str(connection.port or 5432), "database": connection.database, "user": connection.username}}
 
 
 @router.put("/admin/sources/{application_id}")
@@ -291,15 +295,17 @@ async def save_source(application_id: str, payload: dict, account=Depends(user))
     require(account, "admin")
     if set(payload) != {"url", "table_name", "key_field", "allowed_fields", "mapping"}:
         raise RuleError("Укажите подключение, таблицу, ключ, разрешённые поля и сопоставление")
-    validate_source(payload)
     async with antifraud_sessions().begin() as session:
         application = await session.get(Application, application_id)
         if not application:
             raise RuleError("Приложение не найдено")
+        row = await session.get(Source, application_id)
+        if not payload["url"] and row:
+            payload = {**payload, "url": cipher().decrypt(row.encrypted_url.encode()).decode()}
+        validate_source(payload)
         known = {name for config in application.catalog.values() for name in config["fields"]}
         if not set(payload["mapping"]).issubset(known):
             raise RuleError("Сопоставление использует незарегистрированное поле приложения")
-        row = await session.get(Source, application_id)
         if row is None:
             row = Source(application_id=application_id)
             session.add(row)
@@ -307,6 +313,34 @@ async def save_source(application_id: str, payload: dict, account=Depends(user))
         for key in ("table_name", "key_field", "allowed_fields", "mapping"):
             setattr(row, key, payload[key])
     return {"message": "Источник сохранён. Пароль больше не отображается"}
+
+
+@router.post("/admin/sources/{application_id}/test")
+async def test_source(application_id: str, payload: dict, account=Depends(user)):
+    require(account, "admin")
+    if set(payload) != {"url", "table_name", "key_field", "allowed_fields", "mapping", "record_key"}:
+        raise RuleError("Укажите настройки подключения и ключ тестовой записи")
+    config = {key: value for key, value in payload.items() if key != "record_key"}
+    async with antifraud_sessions()() as session:
+        application = await session.get(Application, application_id)
+        if not application:
+            raise RuleError("Приложение не найдено")
+        saved = await session.get(Source, application_id)
+        if not config["url"] and saved:
+            config["url"] = cipher().decrypt(saved.encrypted_url.encode()).decode()
+        validate_source(config)
+        known = {name for action in application.catalog.values() for name in action["fields"]}
+        if not set(config["mapping"]).issubset(known):
+            raise RuleError("Сопоставление использует незарегистрированное поле приложения")
+        candidate = Source(application_id=application_id, encrypted_url=cipher().encrypt(config["url"].encode()).decode(),
+                           **{key: value for key, value in config.items() if key != "url"})
+        try:
+            values = await read_source(candidate, payload["record_key"])
+        except RuleError:
+            raise
+        except Exception:
+            raise DomainError("source_unavailable", "Не удалось прочитать источник. Проверьте сервер, пароль, права чтения и выбранные столбцы", 503) from None
+    return {"message": "Подключение и права чтения проверены. Найдена одна запись; настройки не изменены.", "fields": list(values)}
 
 
 @router.post("/checks")
@@ -327,7 +361,7 @@ async def events(payload: EventInput, x_application_key: str = Header(default=""
 @router.get("/journal")
 async def journal(application_id: str | None = None, action: str | None = None, initiator: str | None = None,
                   state: str | None = None, operation_id: str | None = None, start: datetime | None = None,
-                  end: datetime | None = None, limit: int = 100, offset: int = 0, account=Depends(user)):
+                  end: datetime | None = None, limit: int = 100, offset: int = 0, brief: bool = False, account=Depends(user)):
     require(account, "admin", "specialist")
     if any(value and value.tzinfo is None for value in (start, end)) or (start and end and start > end):
         raise RuleError("Укажите часовой пояс и корректный период журнала")
@@ -346,9 +380,20 @@ async def journal(application_id: str | None = None, action: str | None = None, 
         raise RuleError("Лимит должен быть 1–200, смещение — неотрицательным")
     async with antifraud_sessions().begin() as session:
         rows = (await session.scalars(query.order_by(Decision.created_at.desc()).limit(limit).offset(offset).with_for_update())).all()
+        result = []
         for row in rows:
             await expire(session, row)
-        return [view(row) for row in rows]
+            item = view(row)
+            if brief:
+                # The table does not need snapshots, condition trees or event IDs.
+                # Full immutable evidence remains available from decision_detail;
+                # the original journal API response is preserved by default.
+                item = {**{key: item[key] for key in ("id", "application_id", "operation_id", "action", "initiator", "state", "created_at", "expires_at", "executed_at")},
+                        "operation_title": str(row.checked_values["title"]) if row.checked_values.get("title") is not None else None,
+                        "reasons": [{key: reason[key] for key in ("name", "matched", "reaction", "message", "error") if key in reason}
+                                    for reason in row.reasons if reason.get("matched") or reason.get("message") or reason.get("error")]}
+            result.append(item)
+        return result
 
 
 @router.get("/decisions/{decision_id}")
@@ -536,6 +581,9 @@ async def demo_check(expense_id: str, payload: DemoCheck, account=Depends(user))
         if payload.version is not None and row.version != payload.version:
             raise DomainError("data_changed", "Заявка изменена. Откройте актуальные значения перед действием")
         values = fields(row, account.id)
+    # New attempts synchronize committed facts before receiving initial gates.
+    # Final admission still handles delivery races under its transaction lock.
+    await synchronize_history()
     return await antifraud_call("/api/checks", {"application_id": "demo", "operation_id": payload.operation_id, "action": payload.action,
                                               "initiator": account.id, "record_key": expense_id, "fields": values})
 
@@ -546,6 +594,7 @@ async def export_check(payload: OperationInput, account=Depends(user)):
     async with demo_sessions()() as session:
         rows = (await session.scalars(select(Expense).order_by(Expense.id))).all()
         values = registry_fields(rows, account.id)
+    await synchronize_history()
     return await antifraud_call("/api/checks", {"application_id": "demo", "operation_id": payload.operation_id, "action": "export", "initiator": account.id, "fields": values})
 
 
@@ -558,11 +607,13 @@ async def demo_execute(payload: ExecuteInput, account=Depends(user)):
     try:
         result = await execute(account, payload.operation_id, payload.decision_id, catalog)
     except DomainError as error:
-        if error.code in {"data_changed", "decision_expired"}:
+        if error.code in {"data_changed", "history_changed", "decision_expired"}:
             async with antifraud_sessions().begin() as session:
                 row = await session.scalar(select(Decision).where(Decision.id == payload.decision_id).with_for_update())
                 if row and not row.executed_at and row.state not in TERMINAL:
-                    transition(session, row, "CANCELLED" if error.code == "data_changed" else "EXPIRED", "demo", error.message)
+                    await expire(session, row)
+                    if row.state not in TERMINAL:
+                        transition(session, row, "EXPIRED" if error.code == "decision_expired" else "CANCELLED", "demo", error.message)
         raise
     try:
         delivery = await deliver_outbox()
@@ -578,10 +629,21 @@ async def outbox_delivery(account=Depends(user)):
     return await deliver_outbox()
 
 
+@router.get("/demo/outbox/status")
+async def outbox_status(account=Depends(user)):
+    require(account, "employee", "manager", "accountant", "admin")
+    async with demo_sessions()() as session:
+        query = select(func.count()).select_from(Outbox).where(Outbox.delivered_at.is_(None))
+        if account.role != "admin":
+            query = query.where(Outbox.payload["actor"].as_string() == account.id)
+        return {"pending": await session.scalar(query), "automatic_retry": get_settings().outbox_dispatch_enabled}
+
+
 @router.post("/demo/reset")
 async def reset_demo(payload: ResetInput, account=Depends(user)):
     require(account, "admin")
     async with antifraud_sessions().begin() as af_session:
+        await lock_key(af_session, "history:demo")
         await lock_key(af_session, "check:demo:reset")
         decisions = (await af_session.scalars(select(Decision).where(Decision.application_id == "demo").order_by(Decision.id).with_for_update())).all()
         application = await af_session.get(Application, "demo")

@@ -1,16 +1,17 @@
 param(
     [ValidateSet('chromium', 'firefox')][string]$Browser = 'chromium',
-    [ValidateSet('flow', 'editor', 'review')][string]$Scenario = 'flow',
+    [ValidateSet('flow', 'editor', 'review', 'v1')][string]$Scenario = 'flow',
     [string]$FixtureCache = (Join-Path $env:LOCALAPPDATA 'DiplomaValidation/performance/fixture.json'),
     [switch]$Build,
     [switch]$SkipDemoReset,
     [ValidatePattern('^diploma-review-20261008$')][string]$ReviewProject,
-    [string]$ReportPrefix = 'browser'
+    [string]$ReportPrefix = 'browser',
+    [string]$ReportDirectory = (Join-Path $env:LOCALAPPDATA 'DiplomaValidation/browser')
 )
 $ErrorActionPreference = 'Stop'
 if ($Scenario -eq 'review' -and !$ReviewProject) {throw 'Negative review scenario requires the isolated review project.'}
 $appDirectory = Split-Path -Parent $PSScriptRoot
-$reportDirectory = Join-Path $appDirectory 'diploma-docs/07_reports'
+$reportDirectory = [System.IO.Path]::GetFullPath($ReportDirectory)
 $qaDirectory = Join-Path $reportDirectory '.browser-qa'
 $qaInputDirectory = Join-Path $qaDirectory 'input'
 $qaEnvironmentPath = Join-Path $qaInputDirectory '.env'

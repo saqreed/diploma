@@ -72,6 +72,7 @@ jobs:
     env:
       # A fresh runner and project isolate CI data from every local stand.
       COMPOSE_PROJECT_NAME: diploma-ci-${{ github.run_id }}-${{ github.run_attempt }}
+      DIPLOMA_OUTBOX_DISPATCH_ENABLED: 'false'
       PYTHONUNBUFFERED: '1'
     steps:
       - name: Check out repository
@@ -143,6 +144,29 @@ jobs:
       - name: Check expiry, cancellation and execution races
         working-directory: backend
         run: python tests/http_states.py
+      - name: Start isolated delivery-outage replica for history regressions
+        run: docker compose run --detach --no-deps --name "${COMPOSE_PROJECT_NAME}-history-outage" --publish 127.0.0.1:28001:8000 --env DIPLOMA_OUTBOX_DISPATCH_ENABLED=false --env DIPLOMA_ANTIFRAUD_URL=http://127.0.0.1:1 backend
+      - name: Check final history admission, parallel operations and pending events
+        working-directory: backend
+        env:
+          DIPLOMA_TEST_URL: http://127.0.0.1:8000
+          DIPLOMA_TEST_OUTAGE_URL: http://127.0.0.1:28001
+        run: |
+          export DIPLOMA_TEST_CONTAINER="$(docker compose -f ../docker-compose.yml ps -q backend)"
+          python tests/http_history_execution.py
+      - name: Remove delivery-outage replica
+        if: always() && steps.environment.outcome == 'success'
+        run: docker rm --force "${COMPOSE_PROJECT_NAME}-history-outage" || true
+      - name: Check prepared examples and all eight mechanisms
+        working-directory: backend
+        env:
+          DIPLOMA_TEST_URL: http://127.0.0.1:8000
+        run: python tests/http_demo_examples.py
+      - name: Check automatic delivery after outage and restart without duplicates
+        working-directory: backend
+        env:
+          DIPLOMA_TEST_URL: http://127.0.0.1:8000
+        run: python tests/http_outbox_dispatch.py
       - name: Check registry and archived demo reset
         working-directory: backend
         run: python tests/http_registry_reset.py

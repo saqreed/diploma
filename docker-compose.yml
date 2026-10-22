@@ -32,6 +32,7 @@ services:
       DIPLOMA_SOURCE_ENCRYPTION_KEY: ${DIPLOMA_SOURCE_ENCRYPTION_KEY:?Run scripts/prepare-local.ps1}
       DIPLOMA_SOURCE_HOSTS: postgres
       DIPLOMA_SOURCE_TABLES: demo.requests
+      DIPLOMA_OUTBOX_DISPATCH_ENABLED: ${DIPLOMA_OUTBOX_DISPATCH_ENABLED:-true}
     depends_on:
       postgres:
         condition: service_healthy
@@ -61,6 +62,17 @@ services:
       DIPLOMA_DEMO_API_KEY: ${DIPLOMA_DEMO_API_KEY:?Run scripts/prepare-local.ps1}
     depends_on:
       postgres:
+        condition: service_healthy
+
+  demo-examples:
+    profiles: [tools]
+    image: ${COMPOSE_PROJECT_NAME:-diploma-project}-backend
+    command: [python, -m, app.demo_examples]
+    environment:
+      DIPLOMA_DEMO_EXAMPLES_URL: http://backend:8000
+      DIPLOMA_SEED_PASSWORD: ${DIPLOMA_SEED_PASSWORD:?Run scripts/prepare-local.ps1}
+    depends_on:
+      backend:
         condition: service_healthy
 
 volumes:

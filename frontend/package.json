@@ -9,7 +9,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "check": "npm run lint && npm run build",
+    "check": "npm run lint && npm run test && npm run build",
+    "test": "node --test tests/api.test.mjs",
     "lint": "eslint .",
     "preview": "vite preview"
   },

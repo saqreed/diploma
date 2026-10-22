@@ -77,6 +77,9 @@ export type Decision = {
     message?: string
     trace?: unknown
     exception_trace?: unknown
+    expression?: Expression
+    exception?: Expression | null
+    error?: string
   }>
   transitions?: Array<{ before: string; after: string; actor: string; comment: string; at: string }>
   events?: EventView[]
@@ -100,6 +103,7 @@ export type Expense = {
   category: string
   decision?: DecisionSummary | null
 }
+export type JournalItem = Pick<Decision, 'id' | 'application_id' | 'operation_id' | 'action' | 'initiator' | 'state' | 'created_at' | 'expires_at' | 'executed_at' | 'reasons'> & { operation_title: string | null }
 export type DecisionSummary = { id: string; state: string; action: string; executed_at: string | null; reasons: string[] }
 export type ExpensePage = { items: Expense[]; total: number; offset: number; limit: number }
 export type Watchlist = {
@@ -111,63 +115,77 @@ export type Watchlist = {
 
 export class ApiError extends Error {
   status: number
-  constructor(message: string, status: number) {
+  code: string
+  constructor(message: string, status: number, code = '') {
     super(message)
     this.status = status
+    this.code = code
   }
 }
 
 export async function api<T>(path: string, method = 'GET', body?: unknown, signal?: AbortSignal): Promise<T> {
-  let response: Response
-  try {
-    response = await fetch('/api' + path, {
-      method,
-      credentials: 'same-origin',
-      ...(signal ? { signal } : {}),
-      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'antifraud-ui' },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    })
-  } catch (error) {
-    if (signal?.aborted) throw error
-    throw new Error('Нет связи с сервером. Проверьте подключение и повторите попытку.', { cause: error })
-  }
-  let result
-  try {
-    result = await response.json()
-  } catch {
-    throw new ApiError(
-      'Сервер не вернул ответ. Повторите попытку; введённые данные сохранены.',
-      response.status,
-    )
-  }
-  if (!response.ok) {
-    const names: Record<string, string> = {
-      username: 'аккаунт',
-      password: 'пароль',
-      amount: 'сумма',
-      recipient: 'получатель',
-      receipt: 'номер чека',
-      vendor: 'продавец',
-      purchase_date: 'дата покупки',
-      title: 'назначение',
-      name: 'название',
-      ttl_seconds: 'срок решения',
+  const historyRetryAllowed = method === 'POST' &&
+    (path === '/demo/export/action' || /^\/demo\/requests\/[^/]+\/action$/.test(path)) &&
+    typeof body === 'object' && body !== null && 'operation_id' in body && typeof body.operation_id === 'string'
+  for (let attempt = 0; ; attempt++) {
+    let response: Response
+    try {
+      response = await fetch('/api' + path, {
+        method,
+        credentials: 'same-origin',
+        ...(signal ? { signal } : {}),
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'antifraud-ui' },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      })
+    } catch (error) {
+      if (signal?.aborted) throw error
+      throw new Error('Нет связи с сервером. Проверьте подключение и повторите попытку.', { cause: error })
     }
-    const fields = Array.isArray(result.fields)
-      ? result.fields
-          .map((field: string) => {
-            const key = field.split('.').at(-1) ?? field
-            return names[key] ?? key
-          })
-          .join(', ')
-      : ''
-    throw new ApiError(
-      (result.message ?? 'Не удалось выполнить запрос') +
-        (fields ? '. Проверьте поля: ' + fields : ''),
-      response.status,
-    )
+    let result
+    try {
+      result = await response.json()
+    } catch {
+      throw new ApiError(
+        'Сервер не вернул ответ. Повторите попытку; введённые данные сохранены.',
+        response.status,
+      )
+    }
+    if (!response.ok) {
+      if (historyRetryAllowed && response.status === 503 && result.code === 'history_pending' && attempt < 8) {
+        // Retry only pre-admission history synchronization with the same operation.
+        // Review, confirmation, execution and all other failures remain explicit.
+        await new Promise(resolve => setTimeout(resolve, 250))
+        continue
+      }
+      const names: Record<string, string> = {
+        username: 'аккаунт',
+        password: 'пароль',
+        amount: 'сумма',
+        recipient: 'получатель',
+        receipt: 'номер чека',
+        vendor: 'продавец',
+        purchase_date: 'дата покупки',
+        title: 'назначение',
+        name: 'название',
+        ttl_seconds: 'срок решения',
+      }
+      const fields = Array.isArray(result.fields)
+        ? result.fields
+            .map((field: string) => {
+              const key = field.split('.').at(-1) ?? field
+              return names[key] ?? key
+            })
+            .join(', ')
+        : ''
+      throw new ApiError(
+        (result.message ?? 'Не удалось выполнить запрос') +
+          (fields ? '. Проверьте поля: ' + fields : ''),
+        response.status,
+        typeof result.code === 'string' ? result.code : '',
+      )
+    }
+    return result as T
   }
-  return result as T
 }
 export const labels: Record<string, string> = {
   admin: 'Администратор',
@@ -206,3 +224,11 @@ export const fieldNames: Record<string, string> = { amount: 'Сумма', recipi
 export const fieldLabel = (value: string) => fieldNames[value] ?? value
 export const money = (value: string) =>
   Number(value).toLocaleString('ru-RU', { style: 'currency', currency: 'RUB' })
+export function valueText(value: unknown): string {
+  if (value === null || value === undefined) return '—'
+  if (typeof value === 'boolean') return value ? 'Да' : 'Нет'
+  if (typeof value === 'number') return value.toLocaleString('ru-RU')
+  if (Array.isArray(value)) return value.map(valueText).join(', ')
+  if (typeof value === 'object') return Object.entries(value).map(([k,v]) => `${fieldLabel(k)}: ${valueText(v)}`).join('; ')
+  return String(value)
+}

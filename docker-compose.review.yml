@@ -3,7 +3,12 @@
 services:
   backend:
     image: diploma-review-backend
+    environment:
+      # Fault/race tests control delivery explicitly; http_outbox starts a worker replica.
+      DIPLOMA_OUTBOX_DISPATCH_ENABLED: "false"
     ports: !override
       - "127.0.0.1:28000:8000"
   bootstrap:
+    image: diploma-review-backend
+  demo-examples:
     image: diploma-review-backend

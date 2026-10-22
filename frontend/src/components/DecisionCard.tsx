@@ -1,5 +1,6 @@
-import { fieldNames, label, type Decision } from '../api'
+import { label, type Decision } from '../api'
 import { Explanation } from './Explanation'
+import { Values } from './Values'
 
 const states: Record<string, string> = {
   PENDING_REVIEW: 'Требуется рассмотрение специалистом',
@@ -14,18 +15,18 @@ function Reason({ reason }: { reason: Decision['reasons'][number] }) {
     <div>
       <strong>{reason.message ?? reason.name}</strong>
       <span>
-        {reason.matched ? 'Сработало' : 'Не сработало'} ·{' '}
+        {reason.error ? 'Проверка не завершена' : reason.matched ? 'Сработало' : 'Не сработало'} ·{' '}
         {reason.reaction ? label(reason.reaction) : 'Ошибка проверки'}
       </span>
       {reason.trace ? (
         <details open={Boolean(reason.matched)}>
           <summary>Объяснение</summary>
-          <Explanation trace={reason.trace} />
+          <Explanation trace={reason.trace} node={reason.expression} />
           {reason.exception_trace ? (
-            <>
-              <h3>Проверка исключения</h3>
-              <Explanation trace={reason.exception_trace} />
-            </>
+            <details>
+              <summary>Проверка исключения</summary>
+              <Explanation trace={reason.exception_trace} node={reason.exception ?? undefined} />
+            </details>
           ) : null}
         </details>
       ) : null}
@@ -41,6 +42,7 @@ export function DecisionCard({
 }) {
   const important = decision.reasons.filter((reason) => reason.matched || reason.message)
   const other = decision.reasons.filter((reason) => !reason.matched && !reason.message)
+  const technicalFailure = decision.reasons.some(reason => Boolean(reason.error))
   return (
     <section className="card decision">
       <div className="section-heading">
@@ -51,7 +53,7 @@ export function DecisionCard({
         {label(decision.action)} / {decision.initiator}
       </p>
       <div className={'decision-state ' + decision.state}>
-        <strong>{decision.executed_at ? 'Действие уже сохранено' : states[decision.state]}</strong>
+        <strong>{decision.executed_at ? 'Действие уже сохранено' : technicalFailure ? 'Действие остановлено: ошибка проверки' : states[decision.state]}</strong>
         {decision.remaining_steps.length > 0 && (
           <p>Обязательные этапы: {decision.remaining_steps.map(label).join(', ')}</p>
         )}
@@ -60,6 +62,7 @@ export function DecisionCard({
           {new Date(decision.expires_at).toLocaleString('ru-RU')}.
         </p>
       </div>
+      {technicalFailure && <p>Техническая ошибка не означает мошенничество. Исправьте источник данных или настройки и начните новую попытку.</p>}
       {!decision.executed_at && <p className="muted">{({
         PENDING_REVIEW: 'Специалист примет решение в журнале. Действие ещё не выполнено.',
         PENDING_CONFIRMATION: 'Сверьте проверенные значения и подтвердите именно это действие или откажитесь.',
@@ -89,20 +92,9 @@ export function DecisionCard({
           </div>
         </details>
       )}
-      <details open={decision.state === 'PENDING_CONFIRMATION'}>
+      <details open={['PENDING_CONFIRMATION','PENDING_REVIEW'].includes(decision.state)}>
         <summary>Проверенные значения</summary>
-        <dl>
-          {Object.entries(decision.checked_values).map(([key, value]) => (
-            <div key={key}>
-              <dt>{fieldNames[key] ?? key}</dt>
-              <dd>
-                {typeof value === 'object' && value !== null
-                  ? JSON.stringify(value, null, 2)
-                  : String(value)}
-              </dd>
-            </div>
-          ))}
-        </dl>
+        <Values values={decision.checked_values}/>
       </details>
       {children}
       <details>

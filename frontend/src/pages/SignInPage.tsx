@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { Navigate, useNavigate } from 'react-router'
 import { api, type Account } from '../api'
 import { useSession } from '../session'
+import { Icon } from '../components/Icon'
 function home(role: string) {
   return role === 'admin' ? '/admin' : role === 'specialist' ? '/journal' : '/demo'
 }
@@ -15,6 +16,7 @@ export function SignInPage() {
   if (account) return <Navigate to={home(account.role)} replace />
   async function submit(e: FormEvent) {
     e.preventDefault()
+    if (pending) return
     setPending(true)
     setError('')
     try {
@@ -30,6 +32,7 @@ export function SignInPage() {
   return (
     <div className="login-layout">
       <form className="card login-card" onSubmit={submit} aria-busy={pending}>
+        <div className="login-mark"><Icon name="shield"/></div>
         <h1>Вход в систему</h1>
         <p className="muted">Выберите учебный аккаунт и введите пароль.</p>
         <label>
@@ -72,7 +75,7 @@ export function SignInPage() {
         <button className="primary" disabled={pending}>
           {pending ? 'Вход…' : 'Войти'}
         </button>
-        <p className="muted small">Пароль выдан при подготовке демонстрационного стенда.</p>
+        <p className="muted small">Доступ к учебному стенду. Данные для входа указаны в локальной инструкции запуска.</p>
       </form>
       <p className="login-footer">Учебная система. Выплаты в демо условные.</p>
     </div>

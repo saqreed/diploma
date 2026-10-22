@@ -63,11 +63,17 @@ def main():
         assert len(extra) == 50 and len({e['event_id'] for e in detail['related_events'] + extra}) == 150
         query = '/journal?application_id=' + prefix + '&action=transfer&initiator=actor&state=APPROVED&operation_id=' + d['operation_id']
         assert [r['id'] for r in call(query, method='GET')] == [d['id']]
+        brief = call(query + '&brief=true', method='GET')
+        assert [row['id'] for row in brief] == [d['id']]
+        assert 'checked_values' not in brief[0] and 'operation_title' in brief[0]
+        assert all('trace' not in reason and 'expression' not in reason for reason in brief[0]['reasons'])
+        assert call('/decisions/' + d['id'], method='GET')['reasons'] == detail['reasons']
+        assert call(query, method='GET')[0]['checked_values'] == detail['checked_values']
         assert call(query + '&offset=1', method='GET') == []
         assert call('/journal?application_id=' + prefix + '&state=REJECTED', method='GET') == []
         call('/journal?limit=0', method='GET', expected=422)
         call('/journal?start=2026-10-05T10:00:00', method='GET', expected=422)
-        print('PASS: journal combined filters, pagination, saved history events and input boundaries')
+        print('PASS: journal full/brief compatibility, immutable detail, combined filters, pagination and input boundaries')
         assert count['enabled']
 
 

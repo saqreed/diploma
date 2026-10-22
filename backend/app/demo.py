@@ -1,15 +1,17 @@
-"""Demo owns all writes to its records; check and execution share one transaction."""
+"""Demo owns its writes; final history admission and execution share a lock."""
+from datetime import datetime
 import hashlib
 import json
+import logging
 import os
 
 import httpx2 as httpx
 from sqlalchemy import select
 
 from app.access import require
-from app.decisions import DomainError, db_time, typed_fields
-from app.models import Application, Decision, Execution, Expense, Outbox
-from app.runtime import demo_sessions
+from app.decisions import DomainError, db_time, evaluate_rules, load_history, lock_key, typed_fields
+from app.models import Application, Decision, Execution, Expense, Outbox, Rule, Watchlist
+from app.runtime import antifraud_sessions, demo_sessions
 from app.demo_seed import DEMO_CATALOG
 from app.rules import RuleError
 
@@ -71,8 +73,41 @@ async def antifraud_call(path, payload):
         return response.json()
 
 
+async def validate_execution_history(session, decision, values):
+    # The caller holds history:<application> until the business write commits.
+    # The antifraud principal only reads here: the decision row is already locked
+    # by the demo transaction, which may update executed_at but never approve itself.
+    async with antifraud_sessions()() as af_session:
+        application = await af_session.get(Application, decision.application_id)
+        rules = (await af_session.scalars(select(Rule).where(Rule.application_id == application.id,
+                 Rule.action == decision.action, Rule.enabled.is_(True)).order_by(Rule.id))).all()
+        at = await db_time(session)
+        history = await load_history(af_session, application, rules, values, at)
+        facts = {event["event_id"]: event for event in history}
+        pending = (await session.scalars(select(Outbox).where(Outbox.delivered_at.is_(None)))).all()
+        for row in pending:
+            payload = row.payload
+            event_at = datetime.fromisoformat(payload["event_at"])
+            if payload["application_id"] == application.id and application.history_from <= event_at <= at:
+                # Delivery can have committed in antifraud while its outbox ack
+                # is still pending. One factual event must still count only once.
+                facts.setdefault(payload["event_id"], {**payload, "event_at": event_at})
+        lists = {w.id: w.values for w in (await af_session.scalars(select(Watchlist).where(Watchlist.application_id == application.id))).all()}
+        reasons, reactions = evaluate_rules(rules, values, list(facts.values()), at, lists, decision.operation_id)
+    # A completed review/confirmation applies only to the unchanged recorded gate.
+    # Preserve the immutable explanation and original deadline; a new gate requires
+    # cancellation and a separate attempt rather than silently renewing this one.
+    gates = [r for r in reasons if r.get("matched") and r["reaction"] in {"REVIEW", "CONFIRM"}]
+    if "BLOCK" in reactions or any(reason not in decision.reasons for reason in gates):
+        raise DomainError("history_changed", "Условия проверки изменились после разрешения. Действие не выполнено; создайте новую попытку для актуального рассмотрения или подтверждения")
+
+
 async def execute(account, operation_id, decision_id, catalog):
     async with demo_sessions().begin() as session:
+        # Serialize distinct operations AND factual event ingestion, across workers.
+        # Acquire before decision/expense locks; pending committed outbox facts cover
+        # successful operations even when their API delivery is unavailable.
+        await lock_key(session, "history:demo")
         decision = await session.scalar(select(Decision).where(Decision.id == decision_id).with_for_update())
         if not decision or decision.application_id != "demo" or decision.operation_id != operation_id or decision.initiator != account.id:
             raise DomainError("decision_binding", "Решение не принадлежит этой операции и инициатору", 403)
@@ -85,7 +120,6 @@ async def execute(account, operation_id, decision_id, catalog):
         if decision.action == "export":
             require(account, "accountant")
             # Transaction advisory lock also excludes insertion/editing during registry materialization.
-            from app.decisions import lock_key
             await lock_key(session, "demo:records")
             rows = (await session.scalars(select(Expense).order_by(Expense.id).with_for_update())).all()
             actual = registry_fields(rows, account.id)
@@ -107,6 +141,9 @@ async def execute(account, operation_id, decision_id, catalog):
                 raise DomainError("not_submitted", "Заявку нужно отправить на согласование")
             if decision.action == "submit" and row.status not in {"DRAFT", "REJECTED"}:
                 raise DomainError("already_submitted", "Заявка уже отправлена или исполнена")
+        if await db_time(session) >= decision.expires_at:
+            raise DomainError("decision_expired", "Срок решения истёк. Требуется новая проверка")
+        await validate_execution_history(session, decision, actual)
         now = await db_time(session)
         if now >= decision.expires_at:
             raise DomainError("decision_expired", "Срок решения истёк. Требуется новая проверка")
@@ -139,7 +176,20 @@ async def deliver_outbox():
     async with demo_sessions().begin() as session:
         rows = (await session.scalars(select(Outbox).where(Outbox.delivered_at.is_(None)).limit(100).with_for_update(skip_locked=True))).all()
         for row in rows:
-            await antifraud_call("/api/events", row.payload)
+            try:
+                await antifraud_call("/api/events", row.payload)
+            except Exception as error:
+                logging.getLogger("antifraud").warning("outbox_event_failed %s", json.dumps({"operation_id": row.payload.get("operation_id"), "event_id": row.payload["event_id"], "stage": "event_delivery", "error_type": type(error).__name__}))
+                raise
             row.delivered_at = await db_time(session)
             delivered += 1
     return {"delivered": delivered}
+
+
+async def synchronize_history():
+    await deliver_outbox()
+    # Delivery commits its batch before this check. A locked row or a backlog
+    # beyond the batch must not produce another permission from partial history.
+    async with demo_sessions()() as session:
+        if await session.scalar(select(Outbox.id).where(Outbox.delivered_at.is_(None)).limit(1)):
+            raise DomainError("history_pending", "Доставка сохранённых событий ещё не завершена. Новая проверка пока недоступна; повторите после доставки", 503)

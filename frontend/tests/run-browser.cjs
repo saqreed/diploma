@@ -2,7 +2,7 @@
 const fs = require('node:fs/promises')
 const path = require('node:path')
 const scenario = process.argv[4] || 'flow'
-const {run} = require(scenario === 'editor' ? './browser-editor.cjs' : scenario === 'review' ? './browser-review.cjs' : './browser-acceptance.cjs')
+const {run} = require(scenario === 'editor' ? './browser-editor.cjs' : scenario === 'review' ? './browser-review.cjs' : scenario === 'v1' ? './browser-v1.cjs' : './browser-acceptance.cjs')
 
 async function main() {
   const playwright = require(process.env.PLAYWRIGHT_MODULE || 'playwright')
