@@ -14,6 +14,7 @@ from app.decisions import DomainError
 from app.rules import RuleError
 from app.api.demo_actions import router as demo_router
 from app.outbox import delivery_lifespan
+from app.api.source_settings import router as source_router
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -31,6 +32,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(health_router)
     application.include_router(demo_router)
     application.include_router(antifraud_router)
+    application.include_router(source_router)
 
     @application.middleware("http")
     async def request_context(request: Request, call_next):

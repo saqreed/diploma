@@ -1,0 +1,67 @@
+services:
+  backend:
+    environment:
+      DIPLOMA_SOURCE_POLICY: /source-config/source-policy.json
+      DIPLOMA_SOURCE_INVENTORY: /source-inventory/inventory.json
+    volumes:
+      - ./config/source-policy.json:/source-config/source-policy.json:ro
+      - ./config/local-inventory:/source-inventory:ro
+  source-pg:
+    profiles: [sources]
+    image: postgres:17.11-bookworm
+    environment:
+      POSTGRES_PASSWORD: ${SOURCE_LAB_ADMIN_PASSWORD:?Run prepare-source-lab.ps1}
+      POSTGRES_DB: lab
+      SOURCE_LAB_READER_PASSWORD: ${SOURCE_LAB_READER_PASSWORD:?Run prepare-source-lab.ps1}
+    volumes:
+      - source_pg_data:/var/lib/postgresql/data
+      - ./infra/sources/postgres.sh:/docker-entrypoint-initdb.d/10-lab.sh:ro
+    labels:
+      diploma.source.kind: postgresql
+      diploma.source.host: source-pg
+      diploma.source.port: '5432'
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U postgres -d lab']
+      interval: 5s
+      retries: 20
+  source-mysql:
+    profiles: [sources]
+    image: mysql:8.4.8
+    environment:
+      MYSQL_ROOT_PASSWORD: ${SOURCE_LAB_ADMIN_PASSWORD:?Run prepare-source-lab.ps1}
+      MYSQL_DATABASE: lab
+      SOURCE_LAB_READER_PASSWORD: ${SOURCE_LAB_READER_PASSWORD:?Run prepare-source-lab.ps1}
+    volumes:
+      - source_mysql_data:/var/lib/mysql
+      - ./infra/sources/mysql.sh:/docker-entrypoint-initdb.d/10-lab.sh:ro
+    labels:
+      diploma.source.kind: mysql
+      diploma.source.host: source-mysql
+      diploma.source.port: '3306'
+    healthcheck:
+      test: [CMD-SHELL, 'mysqladmin ping -h localhost --silent']
+      interval: 5s
+      retries: 30
+  source-mongo:
+    profiles: [sources]
+    image: mongo:8.0.17
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: ${SOURCE_LAB_ADMIN_PASSWORD:?Run prepare-source-lab.ps1}
+      MONGO_INITDB_DATABASE: lab
+      SOURCE_LAB_READER_PASSWORD: ${SOURCE_LAB_READER_PASSWORD:?Run prepare-source-lab.ps1}
+    volumes:
+      - source_mongo_data:/data/db
+      - ./infra/sources/mongo.js:/docker-entrypoint-initdb.d/10-lab.js:ro
+    labels:
+      diploma.source.kind: mongodb
+      diploma.source.host: source-mongo
+      diploma.source.port: '27017'
+    healthcheck:
+      test: [CMD, mongosh, --quiet, --eval, 'quit(db.adminCommand({ping:1}).ok ? 0 : 1)']
+      interval: 5s
+      retries: 30
+volumes:
+  source_pg_data:
+  source_mysql_data:
+  source_mongo_data:

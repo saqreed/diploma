@@ -1101,7 +1101,7 @@ h1 {
 }
 .editor-actions {
   grid-column:1/-1;
-  position:sticky;
+  position:static;
   bottom:0;
   background:white;
   border:1px solid var(--line);
@@ -1463,3 +1463,27 @@ input:user-invalid,select:user-invalid,textarea:user-invalid {
   border-color:#b64436;
   background:#fffafa
 }
+/* Forms share the existing white/green surfaces and text-labelled states. */
+.source-cards {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:16px;margin-top:18px}
+.source-card {border:1px solid var(--border,#d7e2dd);border-radius:10px;padding:20px;display:flex;flex-direction:column;gap:10px;min-width:0;overflow-wrap:anywhere}
+.source-card h3,.source-card p {margin:0}
+.source-card .badge {align-self:flex-start}
+.source-card button {margin-top:auto}
+.saved-sources {max-height:330px;overflow:auto;overscroll-behavior:contain}
+.source-symbol {color:#22634f;font-size:26px}
+.connections {display:grid;gap:20px;min-width:0}.connections[hidden] {display:none}
+.connections>.card {min-width:0}
+.connection-form {scroll-margin-top:20px}
+.connection-form fieldset {margin:20px 0}
+.connection-form .table-scroll select {min-width:160px;max-width:100%}
+.duration-control {padding:10px!important;min-width:0}
+.node-fields>.duration-control {grid-column:auto}
+.duration-custom {display:flex;gap:10px}.duration-custom label {min-width:0;flex:1}
+.field-picker {min-width:0}.field-results {max-height:240px;overflow:auto;display:grid;gap:6px;margin-top:8px}
+.field-results button {text-align:left;overflow-wrap:anywhere}
+.value-items {min-width:0;grid-column:1/-1}.value-items textarea {width:100%}
+.value-chips {display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+.value-chip {background:#edf5f0;border:1px solid #d4e4da;border-radius:6px;padding:3px 8px;display:inline-flex;align-items:center;gap:8px;max-width:100%;overflow-wrap:anywhere}
+.value-chip button {padding:2px 6px;border:0;background:transparent}
+.warning {background:#fff5da;border-left:3px solid #997321;padding:12px;color:#624b19}
+@media(max-width:650px){.source-cards{grid-template-columns:1fr}.connections .section-heading{align-items:flex-start;flex-wrap:wrap}.duration-custom{flex-wrap:wrap}.field-picker select{max-width:100%}}

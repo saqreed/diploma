@@ -1,16 +1,11 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { Navigate } from 'react-router'
-import { api, fieldLabel, label, type Application, type Field } from '../api'
+import { api, label, type Application, type Field } from '../api'
 import { useSession } from '../session'
 import { TabBar } from '../components/TabBar'
-type Source = {
-  table_name: string
-  key_field: string
-  allowed_fields: string[]
-  mapping: Record<string, string>
-  credentials_saved?: boolean
-  connection?: {host: string;port: string;database: string;user: string}
-}
+import {Connections} from '../components/Connections'
+import {DurationInput,ValueItems} from '../components/FormControls'
+import {useMemoryDraft} from '../drafts'
 const emptyApp: Application = {
   id: '',
   name: '',
@@ -23,37 +18,15 @@ export function SettingsPage() {
   const [tab, setTab] = useState('applications')
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
-  const [draft, setDraft] = useState<Application | null>(null)
-  const [creating, setCreating] = useState(false)
+  const [draft, setDraft] = useMemoryDraft<Application | null>('catalog-draft',null)
+  const [creating, setCreating] = useMemoryDraft('catalog-creating',false)
   const [newEvent, setNewEvent] = useState('')
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [apiKey, setApiKey] = useState('')
-  const [sourceApp, setSourceApp] = useState('demo')
-  const [source, setSource] = useState<Source>({
-    table_name: 'demo.requests',
-    key_field: 'id',
-    allowed_fields: ['amount', 'recipient'],
-    mapping: { amount: 'amount', recipient: 'recipient' },
-  })
-  const [url, setUrl] = useState('')
-  const [connection, setConnection] = useState({ host: 'postgres', port: '5432', database: 'diploma', user: 'diploma_reader', password: '' })
-  const [mapping, setMapping] = useState('amount=amount\nrecipient=recipient')
   const [resetPhrase, setResetPhrase] = useState('')
-  const [sourceLoading, setSourceLoading] = useState(false)
-  const [sourceReady, setSourceReady] = useState(false)
-  const [connectionDirty, setConnectionDirty] = useState(false)
-  const [testKey, setTestKey] = useState('')
-  const [testResult, setTestResult] = useState('')
-  const [testSignature, setTestSignature] = useState('')
   const [pending, setPending] = useState(false)
   const busy = useRef(false)
-  const sourceRequest = useRef(0)
-  const sourceSignature=JSON.stringify({source,connection,url,mapping,testKey,sourceApp})
-  const sourceFeedback=useRef<HTMLDivElement>(null)
-  useEffect(()=>{
-    if(tab === 'sources' && (error || testResult)) sourceFeedback.current?.scrollIntoView({block:'nearest'})
-  },[tab,error,testResult])
   const load = useCallback(async () => {
     setApps(await api<Application[]>('/admin/applications'))
   }, [])
@@ -126,77 +99,6 @@ export function SettingsPage() {
     }
     if (input.checkValidity() && input.value !== name) changeField(action, name, field, input.value)
   }
-  async function loadSource(id: string) {
-    const requestNumber = ++sourceRequest.current
-    setSourceApp(id)
-    setUrl('')
-    setConnection(current => ({ ...current, password: '' }))
-    setError('')
-    setSourceLoading(true)
-    setSource({table_name:'demo.requests',key_field:'id',allowed_fields:[],mapping:{}});setMapping('')
-    setTestResult('');setConnectionDirty(false)
-    try {
-      const result = await api<Source | null>('/admin/sources/' + id)
-      if (requestNumber !== sourceRequest.current) return
-      if (result) {
-        setSource(result)
-        if (result.connection) setConnection({...result.connection,password:''})
-        setMapping(
-          Object.entries(result.mapping)
-            .map(([a, b]) => a + '=' + b)
-            .join('\n'),
-        )
-      } else {
-        setSource({ table_name: 'demo.requests', key_field: 'id', allowed_fields: [], mapping: {} })
-        setMapping('')
-      }
-    } catch (e) {
-      if (requestNumber === sourceRequest.current) setError((e as Error).message)
-    } finally {
-      if (requestNumber === sourceRequest.current) {setSourceLoading(false);setSourceReady(true)}
-    }
-  }
-  function sourcePayload() {
-      const pairs = mapping
-        .split('\n')
-        .filter(Boolean)
-        .map((line) => line.split('=').map((s) => s.trim()))
-      if (pairs.some((p) => p.length !== 2 || !p[0] || !p[1]))
-        throw new Error('Для каждого поля проверки выберите столбец БД')
-      if (!pairs.length || new Set(pairs.map(pair => pair[0])).size !== pairs.length)
-        throw new Error('Выберите хотя бы одно поле; каждому полю нужен один столбец БД')
-      return {
-        table_name:source.table_name,key_field:source.key_field,allowed_fields:source.allowed_fields,
-        mapping: Object.fromEntries(pairs),
-        url: url || (source.credentials_saved && !connectionDirty ? '' : `postgresql+asyncpg://${encodeURIComponent(connection.user)}:${encodeURIComponent(connection.password)}@${connection.host}:${connection.port}/${encodeURIComponent(connection.database)}`),
-      }
-  }
-  async function saveSource(e: FormEvent) {
-    e.preventDefault()
-    if (busy.current) return
-    busy.current=true;setPending(true);setError('');setTestResult('')
-    try {
-      await api('/admin/sources/' + sourceApp, 'PUT', sourcePayload())
-      setUrl('')
-      setConnection({ ...connection, password: '' })
-      setSource({...source,credentials_saved:true});setConnectionDirty(false)
-      setNotice('Источник сохранён. Пароль не отображается повторно.')
-    } catch (e) {
-      setError((e as Error).message)
-    } finally {
-      busy.current=false;setPending(false)
-    }
-  }
-  async function testSource() {
-    if (busy.current) return
-    if (!testKey.trim()) {setError('Укажите ключ тестовой записи, чтобы проверить чтение и сопоставление.');return}
-    busy.current=true;setPending(true);setError('');setTestResult('')
-    try {
-      const result=await api<{message:string;fields:string[]}>('/admin/sources/'+sourceApp+'/test','POST',{...sourcePayload(),record_key:testKey})
-      setTestResult(result.message+' Поля: '+result.fields.map(fieldLabel).join(', '))
-      setTestSignature(sourceSignature)
-    } catch(e) {setError((e as Error).message)} finally {busy.current=false;setPending(false)}
-  }
   const visibleApps = apps.filter((app) =>
     [app.id, app.name].some((value) =>
       value.toLocaleLowerCase('ru').includes(search.toLocaleLowerCase('ru')),
@@ -245,11 +147,10 @@ export function SettingsPage() {
         active={tab}
         onChange={(value) => {
           setTab(value)
-          if (value === 'sources' && !sourceReady) void loadSource(sourceApp)
         }}
         items={[
           { id: 'applications', label: 'Приложения' },
-          { id: 'sources', label: 'Источники данных' },
+          { id: 'sources', label: 'Подключения' },
           { id: 'demo', label: 'Учебные данные' },
         ]}
       />
@@ -297,7 +198,7 @@ export function SettingsPage() {
         )}
         {tab === 'applications' && draft && (
           <form className="card" onSubmit={save}>
-            <h2>Каталог приложения</h2><p className="muted">Тип действия определяет доступные поля. API — значение передаёт приложение; БД — читается по ключу из источника PostgreSQL.</p>
+            <h2>Каталог приложения</h2><p className="muted">Тип действия определяет доступные поля. API — значение передаёт приложение; БД — читается по ключу из настроенного источника.</p>
             <div className="form-grid">
               <label>
                 Идентификатор
@@ -316,21 +217,11 @@ export function SettingsPage() {
                   onChange={(e) => setDraft({ ...draft, name: e.target.value })}
                 />
               </label>
-              <label>
-                Срок решения, секунды
-                <input
-                  required
-                  type="number"
-                  min="1"
-                  max="86400"
-                  value={draft.ttl_seconds}
-                  onChange={(e) => setDraft({ ...draft, ttl_seconds: Number(e.target.value) })}
-                />
-              </label>
+              <DurationInput title="Срок решения" max={86400} value={draft.ttl_seconds} onChange={v=>setDraft({...draft,ttl_seconds:v??600})}/>
             </div>
             {Object.entries(draft.catalog).map(([action, config]) => (
               <fieldset key={action}>
-                <legend>Тип события: {label(action)}</legend>
+                <legend>Тип события: {label(action)}</legend><ValueItems title="Статусы фактических событий" value={config.statuses??[]} onChange={v=>setDraft({...draft,catalog:{...draft.catalog,[action]:{...config,statuses:v.map(String)}}})}/><p className="small">Варианты этого приложения для настройки истории. Существующие статусы правил не удаляются.</p>
                 <div className="table-scroll">
                   <table>
                     <thead>
@@ -346,6 +237,7 @@ export function SettingsPage() {
                       {Object.entries(config.fields).map(([name, field]) => (
                         <tr key={name}>
                           <td>
+                            <label>Понятное название<input value={field.label??''} placeholder={name} onChange={e=>changeField(action,name,{...field,label:e.target.value})}/></label>
                             <input
                               aria-label={'Имя поля ' + name}
                               required
@@ -359,6 +251,7 @@ export function SettingsPage() {
                                 }
                               }}
                             />
+                            <details><summary>Варианты значений</summary><ValueItems title={'Варианты '+name} value={field.values??[]} type={field.type} onChange={v=>changeField(action,name,{...field,values:v})}/><small>Подсказки конструктора. Новые значения не запрещаются автоматически.</small></details>
                           </td>
                           <td>
                             <select
@@ -458,76 +351,7 @@ export function SettingsPage() {
             </div>
           </form>
         )}
-        {tab === 'sources' && (
-          <form className="card" onSubmit={saveSource}>
-            <h2>Источник PostgreSQL · только чтение</h2>
-            <button type="button" className="quiet" disabled={sourceLoading || pending} onClick={()=>loadSource(sourceApp)}>Загрузить сохранённые настройки</button>
-            <p className="muted">
-              Один источник на поле. Разрешённые таблицы и серверы задаются при локальном
-              подключении. История поступает через API.
-            </p>
-            {source.credentials_saved && <p className="source-saved">Подключение сохранено. Чтобы оставить его прежним, не меняйте параметры доступа. Пароль не возвращается в интерфейс.</p>}
-            <fieldset disabled={sourceLoading || pending} className="form-grid">
-              <label>
-                Приложение
-                <select
-                  aria-label="Приложение"
-                  value={sourceApp}
-                  onChange={(e) => loadSource(e.target.value)}
-                >
-                  {apps.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {Object.entries({ host: 'Сервер БД', port: 'Порт БД', database: 'База данных', user: 'Пользователь только для чтения', password: 'Пароль подключения' }).map(([key, text]) => <label key={key}>{text}<input required={!url && (key !== 'password' || !source.credentials_saved || connectionDirty)} disabled={Boolean(url)} type={key === 'password' ? 'password' : key === 'port' ? 'number' : 'text'} autoComplete={key === 'password' ? 'new-password' : 'off'} min={key === 'port' ? 1 : undefined} max={key === 'port' ? 65535 : undefined} value={connection[key as keyof typeof connection]} onChange={e => {setConnection({ ...connection, [key]: e.target.value });setConnectionDirty(true);setTestResult('')}}/></label>)}
-              <details><summary>Подключение готовым URL</summary><label>URL подключения<input type="password" autoComplete="new-password" placeholder="postgresql+asyncpg://…" value={url} onChange={e => setUrl(e.target.value)}/></label></details>
-              <label>
-                Таблица
-                <input
-                  required
-                  value={source.table_name}
-                  onChange={(e) => setSource({ ...source, table_name: e.target.value })}
-                />
-              </label>
-              <label>
-                Столбец ключа
-                <input
-                  required
-                  value={source.key_field}
-                  onChange={(e) => setSource({ ...source, key_field: e.target.value })}
-                />
-              </label>
-              <label>
-                Разрешённые столбцы через запятую
-                <input
-                  required
-                  value={source.allowed_fields.join(', ')}
-                  onChange={(e) =>
-                    setSource({
-                      ...source,
-                      allowed_fields: e.target.value.split(',').map((s) => s.trim()),
-                    })
-                  }
-                />
-              </label>
-              <fieldset><legend>Какие поля читать из БД</legend>
-                <p className="muted small">Для каждого поля проверки выберите разрешённый столбец. В каталоге приложения у этого поля должен быть выбран источник «БД».</p>
-                {mapping.split('\n').filter(Boolean).map((line, index) => { const [target = '', column = ''] = line.split('='); const update = (value: string) => setMapping(mapping.split('\n').filter(Boolean).map((item, i) => i === index ? value : item).join('\n')); return <div className="form-grid" key={index}><label>Поле проверки<select aria-label="Поле проверки" value={target} onChange={e => update(e.target.value + '=' + column)}>{Array.from(new Set(apps.find(a => a.id === sourceApp) ? Object.values(apps.find(a => a.id === sourceApp)!.catalog).flatMap(config => Object.keys(config.fields)) : [target])).map(name => <option value={name} key={name}>{fieldLabel(name)}</option>)}</select></label><label>Столбец БД<select aria-label="Столбец БД" required value={column} onChange={e => update(target + '=' + e.target.value)}><option value="">Выберите столбец</option>{source.allowed_fields.filter(Boolean).map(name => <option key={name}>{name}</option>)}</select></label><button type="button" onClick={() => setMapping(mapping.split('\n').filter(Boolean).filter((_, i) => i !== index).join('\n'))}>Убрать сопоставление</button></div> })}
-                <button type="button" onClick={() => { const name = Object.values(apps.find(a => a.id === sourceApp)?.catalog ?? {}).flatMap(config => Object.keys(config.fields)).find(name => !mapping.split('\n').some(line => line.startsWith(name + '='))); if (name) setMapping([mapping, name + '=' + (source.allowed_fields[0] ?? '')].filter(Boolean).join('\n')) }}>+ Поле из БД</button>
-                <details><summary>Техническая запись сопоставления</summary><label>Сопоставление: поле проверки=столбец<textarea value={mapping} onChange={e => setMapping(e.target.value)}/></label></details>
-              </fieldset>
-            </fieldset>
-            {sourceLoading && <p role="status">Загружаем настройки источника…</p>}
-            <div className="connection-test"><label>Ключ тестовой записи<input value={testKey} onChange={e=>{setTestKey(e.target.value);setTestResult('')}} placeholder="ID существующей записи"/></label><button type="button" disabled={sourceLoading || pending} onClick={testSource}>{pending ? 'Обрабатываем…' : 'Проверить подключение и чтение'}</button></div>
-            <div ref={sourceFeedback}>{error && <div className="error" role="alert">{error}</div>}{testResult && testSignature === sourceSignature && <div className="notice" role="status">{testResult}</div>}</div>
-            <button className="primary" disabled={sourceLoading || pending}>
-              Сохранить источник
-            </button>
-          </form>
-        )}
+        <Connections apps={apps} onSaved={load} active={tab==='sources'}/>
         {tab === 'demo' && (
           <section className="card danger-zone">
             <h2>Вернуть учебное демо</h2>

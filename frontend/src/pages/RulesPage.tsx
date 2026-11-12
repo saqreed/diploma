@@ -6,29 +6,32 @@ import { TabBar } from '../components/TabBar'
 import { baseNode, kinds } from '../rule-presets'
 import { useSession } from '../session'
 import { mechanismHelp, ruleText } from '../rule-text'
+import {ValueItems} from '../components/FormControls'
+import {useMemoryDraft} from '../drafts'
+import {ruleIssues} from '../rule-validation'
 export function RulesPage() {
   const { account } = useSession()
   const [apps, setApps] = useState<Application[]>([])
-  const [appId, setAppId] = useState('demo')
+  const [appId, setAppId] = useMemoryDraft('rules-app', 'demo')
   const [rules, setRules] = useState<Rule[]>([])
   const [lists, setLists] = useState<Watchlist[]>([])
-  const [draft, setDraft] = useState<Rule | null>(null)
+  const [draft, setDraft] = useMemoryDraft<Rule | null>('rule-draft', null)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [pending, setPending] = useState(false)
   const [listName, setListName] = useState('')
-  const [listValues, setListValues] = useState('')
+  const [listValues, setListValues] = useState<Array<string|number|boolean>>([])
   const [listId, setListId] = useState<string | null>(null)
   const [listType, setListType] = useState('string')
   const [templates, setTemplates] = useState<RuleTemplate[]>([])
-  const [editingTemplate, setEditingTemplate] = useState(false)
+  const [editingTemplate, setEditingTemplate] = useMemoryDraft('rule-is-template', false)
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState('rules')
   const [search, setSearch] = useState('')
   const [ruleState, setRuleState] = useState('enabled')
   const [actionFilter, setActionFilter] = useState('')
   const busy = useRef(false)
-  const appDrafts = useRef(new Map<string,{draft:Rule|null;editingTemplate:boolean;listId:string|null;listName:string;listValues:string;listType:string}>())
+  const appDrafts = useRef(new Map<string,{draft:Rule|null;editingTemplate:boolean;listId:string|null;listName:string;listValues:Array<string|number|boolean>;listType:string}>())
   const load = useCallback(async () => {
     const [a, r, l, t] = await Promise.all([
       api<Application[]>('/admin/applications'),
@@ -66,6 +69,7 @@ export function RulesPage() {
   if (!account) return <Navigate to="/login" replace />
   if (account.role !== 'admin') return <p>Настройка правил доступна администратору.</p>
   const app = apps.find((a) => a.id === appId)
+  const issues=draft&&app?[...ruleIssues(draft.expression,app,draft.action),...(draft.exception?ruleIssues(draft.exception,app,draft.action):[])]:[]
   function closeDraft() {
     appDrafts.current.delete(appId)
     setDraft(null)
@@ -126,6 +130,7 @@ export function RulesPage() {
   async function save(e: FormEvent) {
     e.preventDefault()
     if (!draft) return
+    if(issues.length){setError(issues.join('. '));return}
     await run(async () => {
       const { id, version, ...payload } = draft
       void version
@@ -181,7 +186,7 @@ export function RulesPage() {
               setLoading(true)
               setRules([]); setLists([]); setTemplates([]); setActionFilter('')
               setDraft(cached?.draft ?? null);setEditingTemplate(cached?.editingTemplate ?? false)
-              setListId(cached?.listId ?? null);setListName(cached?.listName ?? '');setListValues(cached?.listValues ?? '');setListType(cached?.listType ?? 'string')
+              setListId(cached?.listId ?? null);setListName(cached?.listName ?? '');setListValues(cached?.listValues ?? []);setListType(cached?.listType ?? 'string')
               setSearch('')
               setRuleState('enabled')
             }}
@@ -376,8 +381,7 @@ export function RulesPage() {
                     setDraft({
                       ...draft,
                       action: e.target.value,
-                      expression: baseNode('field', app, e.target.value),
-                      exception: null,
+
                     })
                   }
                 >
@@ -412,6 +416,7 @@ export function RulesPage() {
               </label>
             </div>
             <h3>2. Условия срабатывания</h3>
+            {issues.length>0&&<div className="warning" role="alert"><strong>Проверьте совместимость перед сохранением</strong><ul>{issues.map((issue,i)=><li key={i}>{issue}</li>)}</ul><p>Существующие условия сохранены. Исправьте перечисленные настройки.</p></div>}
             <RuleBuilder
               node={draft.expression}
               app={app}
@@ -419,7 +424,7 @@ export function RulesPage() {
               lists={lists}
               onChange={(expression) => setDraft({ ...draft, expression })}
             />
-            <h3>3. Исключение</h3>
+            <details open={Boolean(draft.exception)}><summary>Дополнительно: исключение для правила</summary>
             <label className="check">
               <input
                 type="checkbox"
@@ -442,7 +447,7 @@ export function RulesPage() {
                 onChange={(exception) => setDraft({ ...draft, exception })}
               />
             )}
-            </section>
+            </details></section>
             <aside className="card editor-summary"><h2>Как сработает правило</h2><p className="rule-sentence">{ruleText(draft.expression)}</p><h3>Следующий этап</h3><span className={'badge ' + draft.reaction}>{label(draft.reaction)}</span><p>{({REVIEW:'Специалист рассмотрит операцию до выполнения.',CONFIRM:'Инициатор отдельно подтвердит проверенные значения.',BLOCK:'Действие не будет выполнено.',LOG:'Срабатывание сохранится без остановки действия.'} as Record<string,string>)[draft.reaction]}</p><hr/><p>{draft.enabled ? '● Правило включено' : '○ Правило отключено'}</p><small>Черновик сохраняется при переключении вкладок. Изменения применятся после сохранения.</small></aside>
             <div className="actions editor-actions">
               <button className="primary" disabled={pending}>
@@ -470,7 +475,7 @@ export function RulesPage() {
                   onClick={() => {
                     setListId(l.id)
                     setListName(l.name)
-                    setListValues(l.values.map(String).join(', '))
+                    setListValues(l.values)
                     setListType(
                       typeof l.values[0] === 'number'
                         ? 'number'
@@ -499,28 +504,13 @@ export function RulesPage() {
                 e.preventDefault()
                 void run(async () => {
                   const values = listValues
-                    .split(',')
-                    .map((v) => v.trim())
-                    .map((v) => {
-                      if (listType === 'number') {
-                        if (!v || !Number.isFinite(Number(v)))
-                          throw new Error('Список должен содержать числа')
-                        return Number(v)
-                      }
-                      if (listType === 'boolean') {
-                        if (!['true', 'false'].includes(v))
-                          throw new Error('Логические значения: true или false')
-                        return v === 'true'
-                      }
-                      return v
-                    })
                   await api(
                     '/admin/watchlists' + (listId ? '/' + listId : ''),
                     listId ? 'PUT' : 'POST',
                     { name: listName, values, ...(listId ? {} : { application_id: appId }) },
                   )
                   setListName('')
-                  setListValues('')
+                  setListValues([])
                   setListId(null)
                   await load()
                 })
@@ -543,14 +533,7 @@ export function RulesPage() {
                   <option value="boolean">Логические</option>
                 </select>
               </label>
-              <label>
-                Значения через запятую
-                <input
-                  required
-                  value={listValues}
-                  onChange={(e) => setListValues(e.target.value)}
-                />
-              </label>
+              <ValueItems title="Элементы списка" value={listValues} type={listType} onChange={setListValues}/>
               <button disabled={pending}>{listId ? 'Сохранить список' : 'Добавить список'}</button>
               {listId && (
                 <button
@@ -558,7 +541,7 @@ export function RulesPage() {
                   onClick={() => {
                     setListId(null)
                     setListName('')
-                    setListValues('')
+                    setListValues([])
                   }}
                 >
                   Отмена

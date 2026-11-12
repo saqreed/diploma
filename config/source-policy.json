@@ -1,0 +1,9 @@
+{
+  "name": "Учебный Compose diploma-project: объявленные сервисы с метками diploma.source",
+  "endpoints": [
+    {"id":"postgres","kind":"postgresql","host":"postgres","port":5432,"tls":false,"databases":{"diploma":{"demo.requests":{}}}},
+    {"id":"source-pg","kind":"postgresql","host":"source-pg","port":5432,"tls":false,"databases":{"lab":{"public.operations":{"fields":{"id":"integer","batch":"string","amount":"number","recipient":"string","active":"boolean","unsupported":"unsupported"}}}}},
+    {"id":"source-mysql","kind":"mysql","host":"source-mysql","port":3306,"tls":false,"databases":{"lab":{"lab.operations":{"fields":{"id":"integer","batch":"string","amount":"number","recipient":"string","active":"boolean","unsupported":"unsupported"}}}}},
+    {"id":"source-mongo","kind":"mongodb","host":"source-mongo","port":27017,"tls":false,"databases":{"lab":{"operations":{"fields":{"_id":"objectid","id":"integer","batch":"string","amount":"number","recipient":"string","active":"boolean","unsupported":"unsupported"}}}}}
+  ]
+}

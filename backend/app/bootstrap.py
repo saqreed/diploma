@@ -87,6 +87,10 @@ async def bootstrap():
                     catalog[action] = {**catalog[action], "fields": {**catalog[action]["fields"], "category": DEMO_FIELDS["category"]}}
                 application.catalog = catalog
                 session.add(Migration(version=7))
+            if await session.get(Migration, 8) is None:
+                application = await session.get(Application, "demo")
+                application.catalog = {action: {**config, "statuses": config.get("statuses", ["SUCCESS"])} for action, config in application.catalog.items()}
+                session.add(Migration(version=8))
         print("Migrations and missing educational seed applied. Existing records and credentials preserved; no secrets displayed.")
     finally:
         await engine.dispose()

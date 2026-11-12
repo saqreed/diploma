@@ -1,5 +1,7 @@
 export type Account = { id: string; name: string; username: string; role: string }
 export type Field = {
+  label?: string
+  values?: Array<string | number | boolean>
   type: 'string' | 'number' | 'boolean'
   required: boolean
   source: 'API' | 'DB'
@@ -8,7 +10,7 @@ export type Application = {
   id: string
   name: string
   ttl_seconds: number
-  catalog: Record<string, { fields: Record<string, Field> }>
+  catalog: Record<string, { fields: Record<string, Field>; statuses?: string[] }>
 }
 export type Expression = {
   kind: string
@@ -224,6 +226,12 @@ export const fieldNames: Record<string, string> = { amount: 'Сумма', recipi
 export const fieldLabel = (value: string) => fieldNames[value] ?? value
 export const money = (value: string) =>
   Number(value).toLocaleString('ru-RU', { style: 'currency', currency: 'RUB' })
+export function decimalText(value: unknown): string {
+  const raw=String(value??'')
+  if(!/^-?\d+(\.\d+)?$/.test(raw))return raw
+  const [integer,fraction]=raw.split('.')
+  return integer!.replace(/\B(?=(\d{3})+(?!\d))/g,'\u00a0')+(fraction?','+fraction:'')
+}
 export function valueText(value: unknown): string {
   if (value === null || value === undefined) return '—'
   if (typeof value === 'boolean') return value ? 'Да' : 'Нет'

@@ -1,5 +1,5 @@
 import {kinds} from '../rule-presets'
-import {fieldLabel, label, valueText, type Expression} from '../api'
+import {fieldLabel, label, valueText, decimalText, type Expression} from '../api'
 import {comparisons, periodText, ruleText} from '../rule-text'
 
 export function Explanation({trace, node}: {trace: unknown; node?: Expression | undefined}) {
@@ -10,7 +10,7 @@ export function Explanation({trace, node}: {trace: unknown; node?: Expression | 
   const history = Array.isArray(t.event_ids) ? t.event_ids : []
   const kind = String(t.kind)
   const numeric = ['count','aggregate','sequence','previous','duplicate'].includes(kind) || node?.value_type === 'number'
-  const format = (v: unknown) => numeric && v !== null && v !== undefined && Number.isFinite(Number(v)) ? Number(v).toLocaleString('ru-RU') : valueText(v)
+  const format = (v: unknown) => numeric && v !== null && v !== undefined ? decimalText(v) : valueText(v)
   const actual = format(t.actual)
   const subject = kind === 'count' ? 'Количество событий' : kind === 'aggregate' ? node?.aggregate === 'unique' ? 'Разных значений' : 'Накопленная сумма' : kind === 'sequence' ? 'Найдено шагов' : kind === 'previous' ? 'Подходящих предыдущих событий' : t.field || node?.field ? fieldLabel(String(t.field ?? node?.field)) : 'Результат'
   return <div className={'explanation ' + (t.matched ? 'matched' : '')}>

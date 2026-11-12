@@ -57,6 +57,18 @@ def validate_catalog(catalog):
                 raise RuleError("Полю нужен ровно один источник: API или DB")
             if not isinstance(field.get("required", False), bool):
                 raise RuleError("Обязательность поля должна быть логическим значением")
+            if "label" in field and (not isinstance(field["label"], str) or len(field["label"]) > 150):
+                raise RuleError("Название поля должно быть строкой до 150 символов")
+            if "values" in field:
+                if not isinstance(field["values"], list) or len(field["values"]) > 1000:
+                    raise RuleError("Варианты значений должны быть списком до 1000 элементов")
+                for value in field["values"]:
+                    if field["type"] == "number":
+                        number(value)
+                    elif not isinstance(value, str if field["type"] == "string" else bool):
+                        raise RuleError("Варианты не соответствуют типу поля")
+        if "statuses" in config and (not isinstance(config["statuses"], list) or len(config["statuses"]) > 100 or any(not isinstance(s, str) or not s.strip() for s in config["statuses"])):
+            raise RuleError("Статусы каталога должны быть непустыми строками (до 100 вариантов)")
 
 
 def field_names(node):

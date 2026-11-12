@@ -59,12 +59,9 @@ def main():
         writer = {**settings, 'url': 'postgresql+asyncpg://diploma_demo:' + env['DIPLOMA_DEMO_PASSWORD'] + '@postgres:5432/' + env.get('POSTGRES_DB', 'diploma')}
         call(admin, '/admin/sources/' + prefix + '/test', {**writer, 'record_key': row['id']}, expected=422)
         assert call(admin, '/admin/sources/' + prefix, method='GET') == saved, 'Connection test changed saved settings'
-        call(admin, '/admin/sources/' + prefix, writer, 'PUT')
-        unsafe = call(admin, '/checks', {**payload, 'operation_id': str(uuid4())}, headers=key)
-        assert unsafe['state'] == 'REJECTED' and unsafe['reasons'][0]['error'] == 'source_or_field_error'
-        call(admin, '/admin/sources/' + prefix, {**settings, 'url': settings['url'].replace(':5432/', ':5433/')}, 'PUT')
-        failed = call(admin, '/checks', {**payload, 'operation_id': str(uuid4())}, headers=key)
-        assert failed['state'] == 'REJECTED'
+        call(admin, '/admin/sources/' + prefix, writer, 'PUT', expected=422)
+        call(admin, '/admin/sources/' + prefix, {**settings, 'url': settings['url'].replace(':5432/', ':5433/')}, 'PUT', expected=422)
+        assert call(admin, '/admin/sources/' + prefix, method='GET') == saved, 'Failed save changed source'
         print('PASS: writable credentials and unreachable DB fail closed without secret disclosure')
         call(admin, '/admin/sources/' + prefix, settings, 'PUT')
     finally:

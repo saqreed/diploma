@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router'
 import { api, ApiError, label, type Account } from './api'
 import { SessionContext } from './session'
 import { Icon } from './components/Icon'
+import {clearMemoryDrafts} from './drafts'
 
 export function App() {
   const [account, setAccount] = useState<Account | null>(null)
@@ -24,6 +25,7 @@ export function App() {
     setLeaving(true)
     try {
       await api('/auth/logout', 'POST')
+      clearMemoryDrafts()
       setAccount(null)
       navigate('/login')
     } catch (e) {

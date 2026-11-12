@@ -10,7 +10,7 @@ export function baseNode(kind: string, app: Application, action: string): Expres
   if (kind === 'all' || kind === 'any') return {kind, children: [leaf]}
   if (kind === 'not') return {kind, child: leaf}
   if (kind === 'field') return leaf
-  const history = {kind, period_seconds: 86400, group_by: [first], event_types: [action], statuses: ['SUCCESS']}
+  const history = {kind, period_seconds: 86400, group_by: [first], event_types: [action], statuses: config.statuses?.slice(0,1) ?? []}
   if (kind === 'duplicate' || kind === 'previous') return {...history, match_fields: [numeric]}
   if (kind === 'count') return {...history, op: 'ge', value: 3, include_current: true}
   if (kind === 'aggregate') return {...history, aggregate: 'sum', field: numeric, op: 'gt', value: 10000, include_current: true}

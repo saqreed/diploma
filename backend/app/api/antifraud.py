@@ -5,7 +5,6 @@ from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response
 from sqlalchemy import case, delete, select, func
-from sqlalchemy.engine import make_url
 
 from app.access import application_access, require, user
 from app.contracts import ApplicationInput, ApplicationConfirmation, ApplicationCancellation, CheckInput, ConfirmInput, CreateWatchlistInput, DemoCheck, EventInput, ExecuteInput, ExpenseInput, LoginInput, OperationInput, ResetInput, RuleInput, TransitionInput, WatchlistInput
@@ -16,7 +15,6 @@ from app.rules import RuleError, field_names, validate_catalog, validate_express
 from app.runtime import antifraud_sessions, demo_sessions
 from app.security import digest, verify_password
 from app.config import get_settings
-from app.sources import cipher, read_source, validate_source
 from app.demo_seed import seed_data
 
 router = APIRouter(prefix="/api")
@@ -275,72 +273,6 @@ async def delete_list(list_id: str, account=Depends(user)):
                 raise RuleError("Список используется правилом или шаблоном. Сначала измените настройку")
         await session.delete(row)
     return {"deleted": True}
-
-
-@router.get("/admin/sources/{application_id}")
-async def source_view(application_id: str, account=Depends(user)):
-    require(account, "admin")
-    async with antifraud_sessions()() as session:
-        row = await session.get(Source, application_id)
-        if not row:
-            return None
-        connection = make_url(cipher().decrypt(row.encrypted_url.encode()).decode())
-        return {"application_id": row.application_id, "table_name": row.table_name, "key_field": row.key_field,
-                "allowed_fields": row.allowed_fields, "mapping": row.mapping, "credentials_saved": True,
-                "connection": {"host": connection.host, "port": str(connection.port or 5432), "database": connection.database, "user": connection.username}}
-
-
-@router.put("/admin/sources/{application_id}")
-async def save_source(application_id: str, payload: dict, account=Depends(user)):
-    require(account, "admin")
-    if set(payload) != {"url", "table_name", "key_field", "allowed_fields", "mapping"}:
-        raise RuleError("Укажите подключение, таблицу, ключ, разрешённые поля и сопоставление")
-    async with antifraud_sessions().begin() as session:
-        application = await session.get(Application, application_id)
-        if not application:
-            raise RuleError("Приложение не найдено")
-        row = await session.get(Source, application_id)
-        if not payload["url"] and row:
-            payload = {**payload, "url": cipher().decrypt(row.encrypted_url.encode()).decode()}
-        validate_source(payload)
-        known = {name for config in application.catalog.values() for name in config["fields"]}
-        if not set(payload["mapping"]).issubset(known):
-            raise RuleError("Сопоставление использует незарегистрированное поле приложения")
-        if row is None:
-            row = Source(application_id=application_id)
-            session.add(row)
-        row.encrypted_url = cipher().encrypt(payload["url"].encode()).decode()
-        for key in ("table_name", "key_field", "allowed_fields", "mapping"):
-            setattr(row, key, payload[key])
-    return {"message": "Источник сохранён. Пароль больше не отображается"}
-
-
-@router.post("/admin/sources/{application_id}/test")
-async def test_source(application_id: str, payload: dict, account=Depends(user)):
-    require(account, "admin")
-    if set(payload) != {"url", "table_name", "key_field", "allowed_fields", "mapping", "record_key"}:
-        raise RuleError("Укажите настройки подключения и ключ тестовой записи")
-    config = {key: value for key, value in payload.items() if key != "record_key"}
-    async with antifraud_sessions()() as session:
-        application = await session.get(Application, application_id)
-        if not application:
-            raise RuleError("Приложение не найдено")
-        saved = await session.get(Source, application_id)
-        if not config["url"] and saved:
-            config["url"] = cipher().decrypt(saved.encrypted_url.encode()).decode()
-        validate_source(config)
-        known = {name for action in application.catalog.values() for name in action["fields"]}
-        if not set(config["mapping"]).issubset(known):
-            raise RuleError("Сопоставление использует незарегистрированное поле приложения")
-        candidate = Source(application_id=application_id, encrypted_url=cipher().encrypt(config["url"].encode()).decode(),
-                           **{key: value for key, value in config.items() if key != "url"})
-        try:
-            values = await read_source(candidate, payload["record_key"])
-        except RuleError:
-            raise
-        except Exception:
-            raise DomainError("source_unavailable", "Не удалось прочитать источник. Проверьте сервер, пароль, права чтения и выбранные столбцы", 503) from None
-    return {"message": "Подключение и права чтения проверены. Найдена одна запись; настройки не изменены.", "fields": list(values)}
 
 
 @router.post("/checks")
