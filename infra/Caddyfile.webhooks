@@ -1,0 +1,38 @@
+{
+	admin off
+	skip_install_trust
+	auto_https disable_redirects
+}
+
+https://{$DIPLOMA_WEBHOOK_DOMAIN:localhost} {
+	@integration {
+		method POST
+		path /api/events /api/checks
+	}
+	@decision {
+		method GET
+		path_regexp ^/api/checks/[0-9a-f-]+$
+	}
+	@transition {
+		method POST
+		path_regexp ^/api/checks/[0-9a-f-]+/(confirmation|cancel)$
+	}
+	handle @integration {
+		request_body {
+			max_size 256KB
+		}
+		reverse_proxy backend:8000
+	}
+	handle @decision {
+		reverse_proxy backend:8000
+	}
+	handle @transition {
+		request_body {
+			max_size 256KB
+		}
+		reverse_proxy backend:8000
+	}
+	handle {
+		respond 404
+	}
+}

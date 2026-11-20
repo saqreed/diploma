@@ -14,6 +14,7 @@ from app.source_policy import connection_policy, discover
 @pytest.fixture
 def source_env(monkeypatch):
     monkeypatch.delenv('DIPLOMA_SOURCE_POLICY', raising=False)
+    monkeypatch.delenv('DIPLOMA_SOURCE_EXTRA_POLICY', raising=False)
     monkeypatch.delenv('DIPLOMA_SOURCE_INVENTORY', raising=False)
     monkeypatch.setenv('DIPLOMA_SOURCE_HOSTS', 'postgres')
     monkeypatch.setenv('DIPLOMA_SOURCE_TABLES', 'demo.requests')
@@ -87,3 +88,37 @@ def test_discovery_empty_unknown_and_partial(source_env,monkeypatch,tmp_path):
     assert calls==[('postgres',5432)]
     assert [r['state'] for r in result['sources']]==['unavailable','detected']
     assert result['warnings']
+
+
+def test_external_policy_extends_defaults_and_discovery_does_not_probe_it(source_env, monkeypatch, tmp_path):
+    path = tmp_path / "extra.json"
+    inventory = tmp_path / "inventory.json"
+    windows = {"id": "windows-pg", "kind": "postgresql", "host": "host.docker.internal", "port": 5432}
+    cloud = {"id": "cloud-mongo", "kind": "mongodb", "host": "192.0.2.10", "port": 37017}
+    path.write_text(json.dumps({"endpoints": [
+        {**windows, "databases": {"expenses": {"public.operations": {}}}},
+        {**cloud, "auth_database": "admin", "databases": {"expenses": {"operations": {}}}},
+    ]}))
+    inventory.write_text(json.dumps({"updated_at": "2099-01-01T00:00:00Z", "scope": "Windows",
+                                    "sources": [{**windows, "origin": "Windows"}]}))
+    monkeypatch.setenv("DIPLOMA_SOURCE_EXTRA_POLICY", str(path))
+    monkeypatch.setenv("DIPLOMA_SOURCE_INVENTORY", str(inventory))
+
+    async def unexpected_probe(*args):
+        pytest.fail("Opening the source list must not probe a host or external database")
+
+    monkeypatch.setattr(asyncio, "open_connection", unexpected_probe)
+    result = asyncio.run(discover())
+    assert "Windows" in result["scope"]
+    assert [(row["id"], row["state"], row["origin"]) for row in result["sources"]] == [
+        ("windows-pg", "configured", "Windows"),
+        ("cloud-mongo", "configured", "Объявлен в серверной политике"),
+    ]
+    assert all(row["selectable"] and row["databases"] == ["expenses"] for row in result["sources"])
+    _, _, endpoint, _ = connection_policy("mongodb://reader:secret@192.0.2.10:37017/expenses")
+    assert endpoint["tls"] is True and endpoint["auth_database"] == "admin"
+    assert connection_policy("postgresql+asyncpg://reader:secret@postgres/diploma")[1] == "postgresql"
+    with pytest.raises(RuleError):
+        connection_policy("mongodb://reader:secret@192.0.2.10/expenses")
+    with pytest.raises(RuleError):
+        connection_policy("mongodb://reader:secret@192.0.2.10:37017/private")

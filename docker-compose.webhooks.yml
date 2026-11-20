@@ -1,0 +1,17 @@
+# Integration ingress. The default host binding keeps the gateway local.
+services:
+  webhooks:
+    image: caddy:2.11.6-alpine
+    restart: unless-stopped
+    environment:
+      DIPLOMA_WEBHOOK_DOMAIN: ${DIPLOMA_WEBHOOK_DOMAIN:-localhost}
+    ports:
+      - "${DIPLOMA_WEBHOOK_BIND:-127.0.0.1}:${DIPLOMA_WEBHOOK_PORT:-8444}:443"
+    volumes:
+      - ./infra/Caddyfile.webhooks:/etc/caddy/Caddyfile:ro
+      - webhook_tls_data:/data
+    depends_on:
+      backend:
+        condition: service_healthy
+volumes:
+  webhook_tls_data:

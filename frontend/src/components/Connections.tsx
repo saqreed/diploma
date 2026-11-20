@@ -9,6 +9,12 @@ type Inventory={scope:string;updated_at:string;inventory_at:string|null;warnings
 const kinds:Record<string,string>={postgresql:'PostgreSQL · реляционная БД',mysql:'MySQL · реляционная БД',mongodb:'MongoDB · документная БД',unknown:'Неизвестный тип БД'}
 const types:Record<string,string>={string:'Строка',number:'Число',integer:'Целое число',boolean:'Да / нет',objectid:'ObjectId → строка',unsupported:'Не поддерживается'}
 const ports:Record<string,string>={postgresql:'5432',mysql:'3306',mongodb:'27017'}
+const discoveryStates: Record<string, { label: string; style: string }> = {
+  available: { label: 'Порт доступен', style: 'APPROVED' },
+  unavailable: { label: 'Порт недоступен', style: 'REJECTED' },
+  configured: { label: 'Готов к проверке', style: '' },
+  detected: { label: 'Обнаружен', style: '' },
+}
 const blank:Connection={kind:'postgresql',host:'',port:'5432',database:'',user:'',password:''}
 const compatible=(type:string,field:Field)=>field.type===(type==='integer'?'number':type==='objectid'?'string':type)
 
@@ -96,11 +102,14 @@ export function Connections({apps,onSaved,active}:{apps:Application[];onSaved:()
       {!saved.length && <p className="empty">Сохранённых источников пока нет.</p>}
       <div className="source-cards saved-sources">{saved.filter(s=>[s.application_id,apps.find(a=>a.id===s.application_id)?.name,kinds[s.connection.kind],s.connection.host].join(' ').toLocaleLowerCase().includes(search.toLocaleLowerCase())).map(s=><article className="source-card" key={s.application_id}><span className="source-symbol" aria-hidden>▤</span><h3>{apps.find(a=>a.id===s.application_id)?.name??s.application_id}</h3><p>{kinds[s.connection.kind]}</p><p>{s.connection.host}:{s.connection.port} / {s.connection.database}</p><span className="badge APPROVED">Настроен</span><small>Доступ проверяется заново по запросу. {s.table_name}</small><button onClick={()=>{setShow(true);selectApp(s.application_id)}}>Настроить подключение</button></article>)}</div>
     </section>
-    <section className="card"><div className="section-heading"><h2>Обнаруженные источники</h2><button disabled={refreshing} onClick={()=>void refresh()}>{refreshing?'Обновляем…':'Обновить'}</button></div><p className="muted">{inventory?.scope??'Загружаем границы обнаружения…'}</p><p className="small">Проверяются только объявленные адреса. Доступный порт ещё не означает вход в БД или права чтения.</p>
+    <section className="card"><div className="section-heading"><h2>Доступные источники</h2><button disabled={refreshing} onClick={()=>void refresh()}>{refreshing?'Обновляем…':'Обновить'}</button></div><p className="muted">{inventory?.scope??'Загружаем список источников…'}</p><p className="small">Выберите источник и проверьте вход и права чтения. Для БД снаружи Docker можно указать IP или DNS-имя, разрешённое в серверной политике.</p>
       {inventory && <small>Последняя проверка: {new Date(inventory.updated_at).toLocaleTimeString('ru')} · Инвентарь: {inventory.inventory_at?new Date(inventory.inventory_at).toLocaleTimeString('ru'):'серверная конфигурация'}</small>}
       {inventory?.warnings.map(w=><p className="warning" key={w}>{w}</p>)}
       {!refreshing && !inventory?.sources.length && <p className="empty">В настроенном инвентаре нет источников. Можно добавить подключение вручную.</p>}
-      <div className="source-cards">{inventory?.sources.map(s=><article className="source-card" key={s.id}><span className="source-symbol" aria-hidden>▤</span><h3>{s.id}</h3><p>{kinds[s.kind]??kinds.unknown}</p><p>{s.host}:{s.port}</p><small>{s.origin}</small><span className={'badge '+(s.state==='available'?'APPROVED':s.state==='unavailable'?'REJECTED':'')}>{s.state==='available'?'Доступен':s.state==='unavailable'?'Ошибка подключения':'Обнаружен'}</span><button disabled={!s.selectable} onClick={()=>start(s)}>Выбрать источник</button>{!s.selectable && <small>Нет разрешения в серверной политике.</small>}</article>)}</div>
+      <div className="source-cards">{inventory?.sources.map(s=>{
+        const status = discoveryStates[s.state] ?? { label: 'Обнаружен', style: '' }
+        return <article className="source-card" key={s.id}><span className="source-symbol" aria-hidden>▤</span><h3>{s.id}</h3><p>{kinds[s.kind]??kinds.unknown}</p><p>{s.host}:{s.port}</p><small>{s.origin}</small><span className={'badge '+status.style}>{status.label}</span><button disabled={!s.selectable} onClick={()=>start(s)}>Выбрать источник</button>{!s.selectable && <small>Добавьте адрес и ресурс в серверную политику.</small>}</article>
+      })}</div>
     </section>
     {show && <form ref={formRef} className="card connection-form" onSubmit={save}>
       <div className="section-heading"><h2>Настройка подключения</h2><button type="button" onClick={()=>setShow(false)}>Свернуть</button></div>

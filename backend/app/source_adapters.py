@@ -155,7 +155,11 @@ class MongoAdapter:
 async def adapter(url, kind, endpoint, resources):
     if kind == "mongodb":
         from pymongo import AsyncMongoClient
-        client = AsyncMongoClient(url.render_as_string(hide_password=False), directConnection=True,
+        # Supply a single host and credentials separately. User input never
+        # becomes MongoDB URI options or a list of servers.
+        client = AsyncMongoClient(host=url.host, port=url.port or 27017,
+                                  username=url.username, password=url.password,
+                                  authSource=endpoint.get("auth_database", url.database), directConnection=True,
                                   serverSelectionTimeoutMS=3000, connectTimeoutMS=3000, socketTimeoutMS=3000,
                                   timeoutMS=5000, tls=endpoint.get("tls", False))
         try:

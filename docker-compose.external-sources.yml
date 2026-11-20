@@ -1,0 +1,8 @@
+# Optional Windows inventory and extra endpoints. Usable with or without the source lab.
+services:
+  backend:
+    environment:
+      DIPLOMA_SOURCE_INVENTORY: /source-inventory/inventory.json
+      DIPLOMA_SOURCE_EXTRA_POLICY: /source-inventory/operator-endpoints.json
+    volumes:
+      - ./config/local-inventory:/source-inventory:ro

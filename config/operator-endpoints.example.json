@@ -1,0 +1,32 @@
+{
+  "endpoints": [
+    {
+      "id": "windows-postgres",
+      "kind": "postgresql",
+      "host": "host.docker.internal",
+      "port": 5432,
+      "tls": true,
+      "databases": {
+        "expense_app": {
+          "public.operations": {
+            "fields": {"id": "integer", "amount": "number", "recipient": "string"}
+          }
+        }
+      }
+    },
+    {
+      "id": "remote-mongo",
+      "kind": "mongodb",
+      "host": "db.example.com",
+      "port": 27017,
+      "auth_database": "admin",
+      "databases": {
+        "expense_app": {
+          "operations": {
+            "fields": {"_id": "objectid", "amount": "number", "recipient": "string"}
+          }
+        }
+      }
+    }
+  ]
+}
